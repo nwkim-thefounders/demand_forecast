@@ -105,23 +105,8 @@ def show_login():
 
             # 외부 인원 로그인창
             with st.container(border=False, horizontal_alignment="center"):
-                with st.container(border=True, horizontal_alignment="center"):
-                    st.text_input(label="이메일",placeholder="anua@thefounders.kr", key="input_em", on_change=check_email)
-                    st.text_input(label="비밀번호", type="password", key="input_pw", on_change=login_btn)
-                    if not st.session_state["is_valueable"]:
-                        st.error(st.session_state["login_warning_msg"])
-                    else:
-                        st.write("")
-                        st.write("")
-
-                    with st.container(border=False, horizontal=True):
-                        with st.container(border=False, horizontal_alignment="left", gap="xxsmall"):
-                            st.write("외부 사용자를 위한 로그인 창 입니다.")
-                            st.caption("아이디 등록은 관리자에게 문의 해주세요")
-                        with st.container(border=False, horizontal=True, horizontal_alignment="right"):
-                            st.button(label="로그인", on_click=login_btn)
-                            st.write("")
-
+                st.write("")
+                st.write("")
                 st.write("The Founders 직원은 슬랙으로 로그인해주세요")
                 
                 # 🌟 [핵심 변경] oauth2.authorize_button 대신 현재창 전환용 HTML 마크다운 버튼 배치
@@ -137,17 +122,37 @@ def show_login():
 
                 # 슬랙 기본 디자인톤의 블록 버튼 구현 및 target="_self" 부여
                 st.markdown(
-                                    f'''
-                                    <a href="{slack_direct_url}" target="_parent" style="text-decoration: none;">
-                                        <div style="background-color: #4A154B; color: white; padding: 12px 24px; 
-                                                    text-align: center; border-radius: 4px; font-weight: bold; 
-                                                    cursor: pointer; font-size: 16px; margin-top: 10px;">
-                                            Slack으로 로그인
-                                        </div>
-                                    </a>
-                                    ''',
-                                    unsafe_allow_html=True
-                                )
+                    f'''
+                    <a href="{slack_direct_url}" target="_blank" style="text-decoration: none;">
+                        <div style="background-color: #4A154B; color: white; padding: 12px 24px; 
+                                    text-align: center; border-radius: 4px; font-weight: bold; 
+                                    cursor: pointer; font-size: 16px; margin-top: 10px;">
+                            Slack으로 로그인
+                        </div>
+                    </a>
+                    ''',
+                    unsafe_allow_html=True
+                )
+                st.write("")
+                st.write("")
+                st.write("")
+                with st.expander("외부 사용자 로그인"):
+                    with st.container(border=True, horizontal_alignment="center"):
+                        st.text_input(label="이메일",placeholder="anua@thefounders.kr", key="input_em", on_change=check_email)
+                        st.text_input(label="비밀번호", type="password", key="input_pw", on_change=login_btn)
+                        if not st.session_state["is_valueable"]:
+                            st.error(st.session_state["login_warning_msg"])
+                        else:
+                            st.write("")
+                            st.write("")
+
+                        with st.container(border=False, horizontal=True):
+                            with st.container(border=False, horizontal_alignment="left", gap="xxsmall"):
+                                st.write("외부 사용자를 위한 로그인 창 입니다.")
+                                st.caption("아이디 등록은 관리자에게 문의 해주세요")
+                            with st.container(border=False, horizontal=True, horizontal_alignment="right"):
+                                st.button(label="로그인", on_click=login_btn)
+                                st.write("")
     else:
         token_data = st.session_state["auth"]["token"]
         bot_token = token_data["access_token"]
