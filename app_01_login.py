@@ -5,6 +5,7 @@ import snowflake_SQL
 import app_cache_load
 import re
 import pandas as pd
+import urllib.parse  # URL 쿼리 스트링 빌드용 추가
 
 # --- 1. 설정값 및 OAuth 초기화 ---
 CLIENT_ID = st.secrets["slack"]["client_id"]
@@ -17,7 +18,6 @@ oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_URL, TOKEN_URL, TOK
 
 def check_email():
     input_em = st.session_state.get("input_em", "")
-
     email_pattern = r'^[a-zA-Z0-9+-_.]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
 
     if input_em != "":
@@ -54,18 +54,44 @@ def login_btn():
     st.session_state['user_name_kr'] = user_data.loc[user_data["EMAIL"] == input_em, "USER_NAME"].iloc[0]
     st.session_state['user_role'] = user_data.loc[user_data["EMAIL"] == input_em, "ROLE"].iloc[0]
 
-
-
 def regist_user(email: str, name: str):
     engine = snowflake_SQL.connect_snowflake()
     created_at = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
     with engine.connect() as conn:
-        query = f"INSERT INTO ALLOWED_USERS (EMAIL, USER_NAME, ROLE, CREATED_AT) VALUES ('{email}', '{name}', 'USER', '{created_at}');" # 기본 값 USER 권한 변경은 설정 페이지에서 별도
+        query = f"INSERT INTO ALLOWED_USERS (EMAIL, USER_NAME, ROLE, CREATED_AT) VALUES ('{email}', '{name}', 'USER', '{created_at}');"
         snowflake_SQL.query_to_snowflake_with_text(query=query, conn=conn)
 
 def show_login():
     if "user_data" not in st.session_state:
         st.session_state["user_data"] = app_cache_load.load_users_data()
+
+    # 🌟 [핵심 변경] 전체 창 리다이렉트 후 되돌아왔을 때 URL 파라미터(code) 수동 감지 및 처리
+    if "code" in st.query_params:
+        auth_code = st.query_params["code"]
+        with st.spinner("Slack 사용자 인증 정보를 확인 중입니다..."):
+            try:
+                # 슬랙 토큰 교환 요청 (POST)
+                payload = {
+                    "client_id": CLIENT_ID,
+                    "client_secret": CLIENT_SECRET,
+                    "code": auth_code,
+                    "redirect_uri": REDIRECT_URI
+                }
+                res = requests.post(TOKEN_URL, data=payload)
+                result_json = res.json()
+                
+                if result_json.get("ok"):
+                    # 기존 팝업 성공 시 구조와 데이터 스펙 싱크 레이어 매핑
+                    st.session_state["auth"] = {"token": result_json}
+                    # URL에 노출된 code 정보 청소 및 루프 방지
+                    st.query_params.clear()
+                    st.rerun()
+                else:
+                    st.error(f"Slack 인증 토큰 발급에 실패했습니다: {result_json.get('error')}")
+                    st.query_params.clear()
+            except Exception as e:
+                st.error(f"인증 통신 중 오류 발생: {e}")
+                st.query_params.clear()
 
     # auth가 세션에 없으면 슬랙 로그인 화면
     if "auth" not in st.session_state:
@@ -84,7 +110,7 @@ def show_login():
                     st.text_input(label="비밀번호", type="password", key="input_pw", on_change=login_btn)
                     if not st.session_state["is_valueable"]:
                         st.error(st.session_state["login_warning_msg"])
-                    else: # 공간이 갑자기 늘어나는걸방지하기 위한 공간
+                    else:
                         st.write("")
                         st.write("")
 
@@ -97,15 +123,31 @@ def show_login():
                             st.write("")
 
                 st.write("The Founders 직원은 슬랙으로 로그인해주세요")
-                result = oauth2.authorize_button(
-                    name="Slack으로 로그인",
-                    redirect_uri=REDIRECT_URI,
-                    scope="users.profile:read users:read users:read.email",
-                    key="slack_login"
+                
+                # 🌟 [핵심 변경] oauth2.authorize_button 대신 현재창 전환용 HTML 마크다운 버튼 배치
+                scopes = "users.profile:read users:read users:read.email"
+                params = {
+                    "client_id": CLIENT_ID,
+                    "redirect_uri": REDIRECT_URI,
+                    "scope": scopes,
+                    "response_type": "code"
+                }
+                encoded_params = urllib.parse.urlencode(params)
+                slack_direct_url = f"{AUTHORIZE_URL}?{encoded_params}"
+
+                # 슬랙 기본 디자인톤의 블록 버튼 구현 및 target="_self" 부여
+                st.markdown(
+                    f'''
+                    <a href="{slack_direct_url}" target="_self" style="text-decoration: none;">
+                        <div style="background-color: #4A154B; color: white; padding: 12px 24px; 
+                                    text-align: center; border-radius: 4px; font-weight: bold; 
+                                    cursor: pointer; font-size: 16px; margin-top: 10px;">
+                            Slack으로 로그인
+                        </div>
+                    </a>
+                    ''',
+                    unsafe_allow_html=True
                 )
-                if result:
-                    st.session_state["auth"] = result
-                    st.rerun()
     else:
         token_data = st.session_state["auth"]["token"]
         bot_token = token_data["access_token"]
@@ -128,7 +170,6 @@ def show_login():
             user_df = user_data.loc[(user_data["EMAIL"] == email)]
 
             if user_df.empty:
-                # 단 외부 가입자는 내가 등록해야 하도록 설정
                 default_allowed_domains = st.secrets["founders_email"]["domains"]
                 if email.split("@")[-1] not in default_allowed_domains:
                     st.warning("자동 가입이 허용되지 않은 이메일 도메인 입니다. 관리자에게 문의 해주세요")
