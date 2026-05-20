@@ -1,0 +1,12 @@
+# 스트림릿 로컬 보안 파일 제외 (★필수)
+.streamlit/secrets.toml
+
+# 파이썬 가상환경 제외 (★필수)
+venv/
+.venv/
+env/
+
+# 파이썬 실행 캐시 및 시스템 파일 제외
+__pycache__/
+*.pyc
+.DS_Store
