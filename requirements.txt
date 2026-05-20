@@ -1,0 +1,7 @@
+streamlit
+pandas
+snowflake-sqlalchemy
+cryptography
+requests
+streamlit-oauth
+openpyxl
