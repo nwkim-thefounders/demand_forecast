@@ -138,7 +138,7 @@ def show_login():
                 # 슬랙 기본 디자인톤의 블록 버튼 구현 및 target="_self" 부여
                 st.markdown(
                                     f'''
-                                    <a href="{slack_direct_url}" target="_top" style="text-decoration: none;">
+                                    <a href="{slack_direct_url}" target="_parent" style="text-decoration: none;">
                                         <div style="background-color: #4A154B; color: white; padding: 12px 24px; 
                                                     text-align: center; border-radius: 4px; font-weight: bold; 
                                                     cursor: pointer; font-size: 16px; margin-top: 10px;">
