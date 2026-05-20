@@ -137,17 +137,17 @@ def show_login():
 
                 # 슬랙 기본 디자인톤의 블록 버튼 구현 및 target="_self" 부여
                 st.markdown(
-                    f'''
-                    <a href="{slack_direct_url}" target="_self" style="text-decoration: none;">
-                        <div style="background-color: #4A154B; color: white; padding: 12px 24px; 
-                                    text-align: center; border-radius: 4px; font-weight: bold; 
-                                    cursor: pointer; font-size: 16px; margin-top: 10px;">
-                            Slack으로 로그인
-                        </div>
-                    </a>
-                    ''',
-                    unsafe_allow_html=True
-                )
+                                    f'''
+                                    <a href="{slack_direct_url}" target="_parent" style="text-decoration: none;">
+                                        <div style="background-color: #4A154B; color: white; padding: 12px 24px; 
+                                                    text-align: center; border-radius: 4px; font-weight: bold; 
+                                                    cursor: pointer; font-size: 16px; margin-top: 10px;">
+                                            Slack으로 로그인
+                                        </div>
+                                    </a>
+                                    ''',
+                                    unsafe_allow_html=True
+                                )
     else:
         token_data = st.session_state["auth"]["token"]
         bot_token = token_data["access_token"]
