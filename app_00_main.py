@@ -41,7 +41,7 @@ def melt_logic(df):
         var_name='MONTH',
         value_name="FORECAST_QTY"
     )
-    df["SIGNOFF_DT"] = pd.Timestamp.now().strftime("%Y-%m-%d")
+    df["SIGNOFF_DT"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
     df["FCST_MTH"] = pd.Timestamp.now().strftime("%Y%m")
     df = df.set_index(["SIGNOFF_DT", "FCST_MTH"]).reset_index()
     
@@ -206,12 +206,42 @@ def read_df_xlsx(uploaded_file):
     st.session_state["df"] = df
     return df
 
+def is_duplicates(conn):
+    """스노우 플레이크에서 같은 month에 같은 reggistant가 있는지 확인 (기존 업로드 여부 확인)"""
+    user = st.session_state.get("user_name_kr", "")
+    month = pd.Timestamp.now().strftime("%Y%m")
+    query = f"SELECT * FROM TESTDB.PUBLIC.MONTH_FORECAST_CONSOL WHERE FCST_MTH = '{month}' AND REGISTANT = '{user}' LIMIT 1;"
+    before_df = snowflake_SQL.query_to_snowflake_with_text(query=query, conn=conn)
+    
+    if before_df.empty:
+        return False
+    else: return True
+
+def is_sign_off(conn):
+    """토글 활성화 여부 확인 후 활성화시 기존 SING_OFF상태의 데이터 삭제 처리"""
+    user = st.session_state.get("user_name_kr", "")
+    month = pd.Timestamp.now().strftime("%Y%m")
+    sign_off = st.session_state.get("sign_off", False)
+    if sign_off:
+        query = f"DELETE FROM TESTDB.PUBLIC.MONTH_FORECAST_CONSOL WHERE FCST_MTH = '{month}' AND REGISTANT = '{user}' AND SIGN_STATUS = 'SIGNOFF';"
+        snowflake_SQL.query_to_snowflake_with_text(query=query, conn=conn)
+        return True
+    else: return False
+
 def save_btn():
     with st.spinner("데이터를 저장 중입니다..."):
         engine = snowflake_SQL.connect_snowflake()
         with engine.connect() as conn:
             df = st.session_state.get("df", None)
             if df is not None:
+                if is_duplicates(conn=conn):
+                    df["SIGN_STATUS"] = "UPDATE"
+                else:
+                    df["SIGN_STATUS"] = "SIGNOFF"
+                
+                if is_sign_off(conn=conn):
+                    df["SIGN_STATUS"] = "SIGNOFF"
+
                 snowflake_SQL.input_data(conn, df, "MONTH_FORECAST_CONSOL")
         # st.file_uploader에 업로드된 파일 초기화
 
@@ -259,11 +289,13 @@ def show_main():
                         if st.session_state["df"] is not None:
                             st.caption("시트 읽어오기", help=read_help_text)
                         st.caption("검사 로직", help=check_help_text)
+                        st.write("")
                         with st.container(border=False, horizontal=True):
                             with st.container(border=False, horizontal=True, horizontal_alignment="left"):
                                 st.subheader("데이터 미리보기")
                             with st.container(border=False, horizontal=True, horizontal_alignment="right"):
                                 if st.session_state["is_valid"]:
+                                    st.toggle(label="Sign off", key="sign_off", help="활성화 상태로 데이터 저장시 기존 SIGN_OFF 상태의 데이터를 삭제 후 재업로드 합니다.")
                                     st.button(label="데이터 저장", type="primary", on_click=save_btn)
 
                         st.dataframe(df, width="stretch")
