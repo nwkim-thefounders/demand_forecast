@@ -55,7 +55,6 @@ def melt_logic(df):
     return df
 
 def read_df_xlsx(uploaded_file):
-    print("1")
     try:
         origin_df = pd.read_excel(uploaded_file, sheet_name="QTY")
     except Exception as e:
@@ -85,11 +84,11 @@ def read_df_xlsx(uploaded_file):
                     break
             break
 
-    print("2")
     # 2. 카테고리 인덱스 찾기
     category_col_idx = None
     for i, row in origin_df.iterrows():
-        if "카테고리" in str(row.values):
+        # str(row.values) 대신 임의의 원소 중 문자열에 "카테고리"가 포함되어 있는지 리스트 컴프리헨션으로 검사
+        if any("카테고리" in str(val) for val in row.values):
             for j, col in enumerate(row):
                 if "카테고리" in str(col):
                     category_col_idx = j
@@ -104,13 +103,14 @@ def read_df_xlsx(uploaded_file):
     final_forecast_col_idx = None
     sub_header_i = None
     for i, row in origin_df.iterrows():
-        if "FINAL Forecast" in str(row.values):
+        if any("FINAL Forecast" in str(val) for val in row.values):
             sub_header_i = i
             for j, col in enumerate(row):
-                if "FINAL Forecast" == str(col):
+                if "FINAL Forecast" == str(col).strip(): # 혹시 모를 양끝 공백 제거
                     final_forecast_col_idx = j-1
                     break
             break
+        
     if final_forecast_col_idx == None:
         st.session_state["err_msg"] = "시트에서 'FINAL Forecast' 컬럼 위치를 정확히 찾을 수 없습니다."
         st.session_state["is_valid"] = False
