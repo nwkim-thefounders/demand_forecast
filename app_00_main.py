@@ -55,14 +55,28 @@ def melt_logic(df):
     return df
 
 def read_df_xlsx(uploaded_file):
-    origin_df = pd.read_excel(uploaded_file, sheet_name="QTY")
-    # 모든 데이터 타입을 문자열로 읽기
-    # origin_df = origin_df.astype(str)
+    print("1")
+    try:
+        origin_df = pd.read_excel(uploaded_file, sheet_name="QTY")
+    except Exception as e:
+        st.session_state["err_msg"] = f"엑셀 파일의 'QTY' 시트를 찾을 수 없거나 읽는데 실패했습니다. (원인: {e})"
+        st.session_state["is_valid"] = False
+        return None
+
     df = origin_df.copy()
+    
+    # 1. SKU 행 시작점 찾기
+    sku_row_found = False
     for i, row in df.iterrows():
         if "SKU" in row.values:
             df = df.iloc[i:]
+            sku_row_found = True
             break
+    if not sku_row_found:
+        st.session_state["err_msg"] = "시트 내에서 'SKU'가 포함된 시작 행을 찾을 수 없습니다."
+        st.session_state["is_valid"] = False
+        return None
+
     for i, row in df.iterrows():
         if "SKU" in str(row):
             for j, col in enumerate(row):
@@ -70,8 +84,9 @@ def read_df_xlsx(uploaded_file):
                     df = df.drop(df.columns[j-1], axis=1)
                     break
             break
-    # origin_df의 "카테고리"부터 "FINAL Forecast" 라는 글자가 있는데 컬럼의 전까지 삭제하는 코드
-    # 1 단계 : 행별로 순환 하면서 "카테고리" 글자가 있는 행 찾고, 해당 행에서 "카테고리"라는 글자가 있는 컬럼 인덱스 찾기
+
+    print("2")
+    # 2. 카테고리 인덱스 찾기
     category_col_idx = None
     for i, row in origin_df.iterrows():
         if "카테고리" in str(row.values):
@@ -80,8 +95,12 @@ def read_df_xlsx(uploaded_file):
                     category_col_idx = j
                     break
             break
+    if category_col_idx == None:
+        st.session_state["err_msg"] = "시트에서 '카테고리' 컬럼 위치를 찾을 수 없습니다."
+        st.session_state["is_valid"] = False
+        return None
     
-    # 2단계 : "FINAL Forecast" 글자가 있는 행 찾고, 해당 행에서 "FINAL Forecast"라는 글자가 있는 컬럼 인덱스 찾기
+    # 3. FINAL Forecast 인덱스 찾기
     final_forecast_col_idx = None
     sub_header_i = None
     for i, row in origin_df.iterrows():
@@ -92,53 +111,83 @@ def read_df_xlsx(uploaded_file):
                     final_forecast_col_idx = j-1
                     break
             break
-    # 3단계 : sub_header_i 행에서 "M-1" 글자가 있는 행 찾고, 해당 행에서 "M-1"라는 글자가 있는 컬럼 인덱스 찾기
+    if final_forecast_col_idx == None:
+        st.session_state["err_msg"] = "시트에서 'FINAL Forecast' 컬럼 위치를 정확히 찾을 수 없습니다."
+        st.session_state["is_valid"] = False
+        return None
+
+    # 4. M-1 인덱스 찾기
     m1_col_idx = None
     for i, row in origin_df.iterrows():
         if i == sub_header_i:
             for j, col in enumerate(row):
                 if j < final_forecast_col_idx + 2:
                     continue
-                if type(col) == str: # final_forecast_col_idx 이후에 col의 타입이 str일때 까지
+                if type(col) == str: 
                     m1_col_idx = j-1
                     break
             break
+    if m1_col_idx == None:
+        st.session_state["err_msg"] = "'FINAL Forecast' 이후에 오는 기준 데이터(M-1 등) 컬럼 위치를 찾을 수 없습니다."
+        st.session_state["is_valid"] = False
+        return None
 
-    # 4단계 : m1_col_idx부터 끝까지 삭제
-    df = df.drop(df.columns[m1_col_idx:], axis=1) # m1_col_idx 은 76인데 왜 안잘리지?
-    # print("df after drop m1_col_idx:", df.shape) # 출력내용: df after drop m1_col_idx: (497, 44)
+    # 데이터 자르기 공정
+    try:
+        # 4단계 : m1_col_idx부터 끝까지 삭제
+        df = df.drop(df.columns[m1_col_idx:], axis=1) 
+        # 5단계 : category_col_idx부터 final_forecast_col_idx까지 삭제
+        df = df.drop(df.columns[category_col_idx:final_forecast_col_idx], axis=1)
 
-    # 5단계 : category_col_idx부터 final_forecast_col_idx까지 삭제
-    df = df.drop(df.columns[category_col_idx:final_forecast_col_idx], axis=1)
+        # 첫 번째 행을 헤더로 설정
+        df.columns = df.iloc[0]
+        df = df[1:]
+        df = df.reset_index(drop=True)
+    except Exception as e:
+        st.session_state["err_msg"] = f"지정된 인덱스로 컬럼을 자르는 중 오류가 발생했습니다: {e}"
+        st.session_state["is_valid"] = False
+        return None
 
-    # 첫 번째 행을 헤더로 설정
-    df.columns = df.iloc[0]
-    df = df[1:]
-    df = df.reset_index(drop=True)
-    st.session_state["is_valid"] = True
+    # 5. 헤더 변환 후 SKU 컬럼 존재 여부 체크 (🚨 핵심 에러 방지 방어 코드)
+    if "SKU" not in df.columns:
+        st.session_state["err_msg"] = "데이터 변환 후 'SKU' 컬럼이 헤더에 존재하지 않습니다. 엑셀 파일 형식을 확인해주세요."
+        st.session_state["is_valid"] = False
+        return None
 
     # SKU가 비어있는 행 삭제
     df = df.loc[df["SKU"].notna()]
 
     # desc가 비어있는 행 찾기
-    desc_err_df = df.copy()
-    desc_err_df = desc_err_df[desc_err_df["DESC"].isna()]
+    if "DESC" not in df.columns:
+        st.session_state["err_msg"] = "'DESC' 컬럼을 찾을 수 없습니다."
+        st.session_state["is_valid"] = False
+        return None
+        
+    desc_err_df = df[df["DESC"].isna()]
     if not desc_err_df.empty:
         st.session_state["err_msg"] = "QTY 시트의 DESC 컬럼에 빈 값이 있습니다."
         st.session_state["is_valid"] = False
         return df
 
     # 사업부가 비어있는 행 찾기
-    business_unit_err_df = df.copy()
-    business_unit_err_df = business_unit_err_df[business_unit_err_df["사업부"].isna()]
+    if "사업부" not in df.columns:
+        st.session_state["err_msg"] = "'사업부' 컬럼을 찾을 수 없습니다."
+        st.session_state["is_valid"] = False
+        return None
+
+    business_unit_err_df = df[df["사업부"].isna()]
     if not business_unit_err_df.empty:
         st.session_state["err_msg"] = "QTY 시트의 사업부 컬럼에 빈 값이 있습니다."
         st.session_state["is_valid"] = False
         return df
     
     # 채널이 비어있는 행 찾기
-    channel_err_df = df.copy()
-    channel_err_df = channel_err_df[channel_err_df["채널"].isna()]
+    if "채널" not in df.columns:
+        st.session_state["err_msg"] = "'채널' 컬럼을 찾을 수 없습니다."
+        st.session_state["is_valid"] = False
+        return None
+
+    channel_err_df = df[df["채널"].isna()]
     if not channel_err_df.empty:
         st.session_state["err_msg"] = "QTY 시트의 채널 컬럼에 빈 값이 있습니다."
         st.session_state["is_valid"] = False
@@ -146,22 +195,30 @@ def read_df_xlsx(uploaded_file):
 
     st.session_state["is_valid"] = True
     st.session_state["err_msg"] = ""
-    df = melt_logic(df)
+    
+    try:
+        df = melt_logic(df)
+    except Exception as e:
+        st.session_state["err_msg"] = f"데이터 구조 변경(Melt) 중 오류가 발생했습니다: {e}"
+        st.session_state["is_valid"] = False
+        return None
+
     st.session_state["df"] = df
     return df
 
 def save_btn():
-    engine = snowflake_SQL.connect_snowflake()
-    with engine.connect() as conn:
-        df = st.session_state.get("df", None)
-        if df is not None:
-            snowflake_SQL.input_data(conn, df, "MONTH_FORECAST_CONSOL")
-    # st.file_uploader에 업로드된 파일 초기화
+    with st.spinner("데이터를 저장 중입니다..."):
+        engine = snowflake_SQL.connect_snowflake()
+        with engine.connect() as conn:
+            df = st.session_state.get("df", None)
+            if df is not None:
+                snowflake_SQL.input_data(conn, df, "MONTH_FORECAST_CONSOL")
+        # st.file_uploader에 업로드된 파일 초기화
 
-    st.session_state["df"] = None
-    st.session_state["is_valid"] = False
-    st.session_state["err_msg"] = ""
-    st.session_state["uploader_version"] = st.session_state.get("uploader_version", 0) + 1
+        st.session_state["df"] = None
+        st.session_state["is_valid"] = False
+        st.session_state["err_msg"] = ""
+        st.session_state["uploader_version"] = st.session_state.get("uploader_version", 0) + 1
     
 
 def show_main():
@@ -194,9 +251,11 @@ def show_main():
             if uploaded_file is not None:
                 try:
                     df = read_df_xlsx(uploaded_file)
-                    if st.session_state["err_msg"]:
+                    
+                    # 에러 메시지가 세션에 담겨 있다면 에러박스 출력
+                    if st.session_state.get("err_msg"):
                         st.error(st.session_state["err_msg"])
-                    else:
+                    elif df is not None:
                         if st.session_state["df"] is not None:
                             st.caption("시트 읽어오기", help=read_help_text)
                         st.caption("검사 로직", help=check_help_text)
@@ -210,7 +269,8 @@ def show_main():
                         st.dataframe(df, width="stretch")
 
                 except Exception as e:
-                    st.error(f"파일을 읽는 중 오류가 발생했습니다: {e}")
+                    # 예상치 못한 시스템 치명적 에러 핸들링
+                    st.error(f"시스템 예외가 발생했습니다 (개발자 문의 필요): {e}")
             else:
                 st.info("업로드된 파일이 없습니다. 업로드할 파일을 선택해주세요.")
 
