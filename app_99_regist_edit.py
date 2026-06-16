@@ -33,7 +33,7 @@ def show_edit_page():
         st.select_slider(label="등록 월 - FCST_MTH", options=fcst_month_list, value=(fcst_month_list[-2], fcst_month_list[-1]), key="selectedfcst_month")
 
         target_month_list = st.session_state.get("target_month_list", [])
-        st.select_slider(label="예측 월 - MONTH", options=target_month_list, value=(target_month_list[0], target_month_list[-1]), key="selected_target_month")
+        st.select_slider(label="예측 월 - MONTH", options=target_month_list, value=(target_month_list[-2], target_month_list[-1]), key="selected_target_month")
 
         dept_list = st.session_state.get("dept_list", [])
         st.multiselect(label="사업부 - DEPT", options=dept_list, key="selected_dept")
