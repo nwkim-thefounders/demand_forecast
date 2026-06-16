@@ -3,6 +3,11 @@ import pandas as pd
 import app_01_login
 import datetime
 import snowflake_SQL
+import io
+import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment
+from openpyxl.worksheet.datavalidation import DataValidation
+from dateutil.relativedelta import relativedelta
 
 check_help_text = """
 **검사 로직 설명**
@@ -54,13 +59,8 @@ def melt_logic(df):
     df = df.rename(columns=col_mapping)
     return df
 
-def read_df_xlsx(uploaded_file):
-    try:
-        origin_df = pd.read_excel(uploaded_file, sheet_name="QTY")
-    except Exception as e:
-        st.session_state["err_msg"] = f"엑셀 파일의 'QTY' 시트를 찾을 수 없거나 읽는데 실패했습니다. (원인: {e})"
-        st.session_state["is_valid"] = False
-        return None
+def read_origin_xl(uploaded_file):
+    origin_df = pd.read_excel(uploaded_file, sheet_name="QTY")
 
     df = origin_df.copy()
     
@@ -202,9 +202,118 @@ def read_df_xlsx(uploaded_file):
         st.session_state["err_msg"] = f"데이터 구조 변경(Melt) 중 오류가 발생했습니다: {e}"
         st.session_state["is_valid"] = False
         return None
-
+    df = df.replace(0, None)
+    df = df.dropna(subset="FORECAST_QTY")
     st.session_state["df"] = df
     return df
+
+def read_upload_xl(uploaded_file):
+    engine = snowflake_SQL.connect_snowflake()
+    with engine.connect() as conn:
+        pdf = snowflake_SQL.query_to_snowflake_with_text('SELECT "품목코드", "요청_품목명_국문" FROM TESTDB.PUBLIC.PRODUCT_MASTER', conn=conn)
+    df = pd.read_excel(uploaded_file, sheet_name="업로드 양식")
+    for i, row in df.iterrows():
+        if "SKU" in row.values:
+            header_row = i
+            break
+    
+    df.columns = [str(col).replace(".0", "") for col in df.iloc[header_row]]
+    df.columns = [col.upper().replace(" ", "_") for col in df.columns]
+    df = df[header_row + 1 :]
+    if df.empty:
+        st.session_state["err_msg"] = "데이터가 없습니다."
+        st.session_state["is_valid"] = False
+        return None
+    
+    # 데이터 프레임 양식 정리
+    df = df.replace("", None)
+    df = df.replace(0, None)
+
+    if "STATUS" in df.columns:
+        df["STATUS"] = df["STATUS"].fillna("").astype(str)
+    
+    # 포캐스트 월 컬럼 추출
+    month_col = []
+    for col in df.columns:
+        try:
+            pd.to_numeric(col)
+        except:
+            continue
+        month_col.append(col)
+
+    # 포캐스트 월에 해당하는 컬럼이 없음젼 에러 발생
+    if not month_col:
+        st.session_state["err_msg"] = "포캐스트 월에 해당하는 컬럼을 찾을 수 없습니다.\n 예: '202606', '202607'"
+        st.session_state["is_valid"] = False
+        return None
+    
+    # 포캐스트 월 중 입력하지 않은 컬럼 삭제
+    for col in month_col:
+        month_df = df.loc[df[col].notna(), col]
+        if month_df.empty:
+            df = df.drop(columns=col)
+    
+
+    # 데이터 피벗
+    df = pd.melt(
+        frame=df,
+        id_vars=[col for col in df.columns if col not in month_col],
+        value_vars=[col for col in df.columns if col in month_col],
+        value_name="FORECAST_QTY",
+        var_name="MONTH",
+        ignore_index=True
+    )
+    # FORECAST_QTY에서 None 인것 drop
+    df = df.dropna(subset="FORECAST_QTY")
+    # 품목명 join
+    df = pd.merge(
+        left=df,
+        right=pdf,
+        how="left",
+        left_on="SKU",
+        right_on="품목코드"
+    )
+    # 기본값 입력
+    df["SIGNOFF_DT"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    df["FCST_MTH"] = datetime.datetime.now().strftime("%Y%m")
+    df["REGISTANT"] = st.session_state.get("user_name_kr", "")
+
+    # 컬럼 이름 변경 및 순서 재지정
+    col_map = {
+        "SIGNOFF_DT": "SIGNOFF_DT",
+        "FCST_MTH": "FCST_MTH",
+        "SKU": "SKU",
+        "요청_품목명_국문": "DESC",
+        "STATUS": "STATUS",
+        "ABC_CLASS": "ABC_CLASS",
+        "사업부": "DEPT",
+        "채널": "CHANNEL",
+        "MONTH": "MONTH",
+        "FORECAST_QTY": "FORECAST_QTY",
+        "REGISTANT": "REGISTANT"
+    }
+    df = df[[key for key in col_map.keys()]]
+    df = df.rename(columns=col_map)
+
+    st.session_state["df"] = df
+    st.session_state["is_valid"] = True
+    st.session_state["err_msg"] = ""
+    return df
+
+def read_df_xlsx(uploaded_file):
+    st.session_state["err_msg"] = ""
+    xl = pd.ExcelFile(uploaded_file)
+    sheet_names = xl.sheet_names
+    if "업로드 양식" in sheet_names:
+        df = read_upload_xl(uploaded_file)
+        return df
+    elif "QTY" in sheet_names:
+        df = read_origin_xl(uploaded_file)
+        return df
+    else:
+        st.session_state["err_msg"] = f"엑셀 파일의 'QTY' or '업로드 양식' 시트를 찾을 수 없습니다.\n\n**Monthly Forecast File** 엑셀 혹은 **업로드 양식** 엑셀을 업로드 해주세요"
+        st.session_state["is_valid"] = False
+        return None
 
 def is_duplicates(conn):
     """스노우 플레이크에서 같은 month에 같은 reggistant가 있는지 확인 (기존 업로드 여부 확인)"""
@@ -228,16 +337,65 @@ def is_sign_off(conn):
         return True
     else: return False
 
+def make_tamplate_xlsx():
+    """openpyxl로 템플릿을 생성하고 메모리 버퍼(BytesIO)에 담아 반환하는 함수"""
+    excel_buffer = io.BytesIO()
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "업로드 양식"
+
+    today = datetime.datetime.now()
+    
+    # 달 추가
+    month_list = [(today + relativedelta(months=i)).strftime("%Y%m") for i in range(13)]
+    
+    manual = ["필수", "1: 신제품, 2: 런닝품, 3: 단종 임박", "", "필수", "필수"] + ["FCST" for col in month_list]
+    header = ["SKU", "Status", "ABC class", "사업부", "채널"] + month_list
+    ws.append(manual)
+    ws.append(header)
+
+    # 서식 지정
+    manual_font = Font(name="맑은 고딕", size=11, bold=False, color="FF0000")
+    header_font = Font(name="맑은 고딕", size=11, bold=True, color="FFFFFF")
+    header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+
+    for i in range(len(manual)):
+        ws.cell(row=1, column=i+1).font = manual_font
+
+    for i in range(len(header)):
+        ws.cell(row=2, column=i+1).font = header_font
+        ws.cell(row=2, column=i+1).fill = header_fill
+
+    drop_down_options = '"1,2,3,4,5"' 
+    dv = DataValidation(type="list", formula1=drop_down_options, allow_blank=True)
+    
+    # 드롭다운 에러 메세지 설정
+    dv.showErrorMessage = True
+    dv.errorStyle = "stop"
+    dv.errorTitle = "입력 오류 (지정된 목록 없음)"
+    dv.error = "드롭다운 목록에 있는 값만 입력할 수 있습니다."
+    
+    dv.add("B3:B1000")
+    
+    # 시트에 드롭다운 객체 추가
+    ws.add_data_validation(dv)
+    
+    # 1. 생성한 워크북을 메모리 버퍼(excel_buffer)에 저장
+    wb.save(excel_buffer)
+    
+    # 2. 버퍼의 포인터를 처음 위치로 이동
+    excel_buffer.seek(0)
+    
+    # 3. 바이너리 데이터 파일 값 반환
+    return excel_buffer.getvalue()
+
 def save_btn():
     with st.spinner("데이터를 저장 중입니다..."):
         engine = snowflake_SQL.connect_snowflake()
         with engine.connect() as conn:
             df = st.session_state.get("df", None)
             if df is not None:
-                if is_duplicates(conn=conn):
-                    df["SIGN_STATUS"] = "UPDATE"
-                else:
-                    df["SIGN_STATUS"] = "SIGNOFF"
+                df["SIGN_STATUS"] = "REGIST"
                 
                 if is_sign_off(conn=conn):
                     df["SIGN_STATUS"] = "SIGNOFF"
@@ -249,7 +407,6 @@ def save_btn():
         st.session_state["is_valid"] = False
         st.session_state["err_msg"] = ""
         st.session_state["uploader_version"] = st.session_state.get("uploader_version", 0) + 1
-    
 
 def show_main():
     st.set_page_config(
@@ -271,6 +428,16 @@ def show_main():
             st.write(f"{st.session_state.get('user_name_kr', '')}님, 환영합니다!")
             st.write("아래 엑셀파일을 업로드 하거나 drag & drop으로 업로드 해주세요.")
 
+            with st.container(border=False, horizontal=True, horizontal_alignment="right"):
+                xlsx_data = make_tamplate_xlsx()
+                st.download_button(
+                    label="양식 다운로드",
+                    data=xlsx_data,
+                    file_name="regist_template.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    type="secondary",
+                    key="bulk_template_download"
+                )
             uploaded_file = st.file_uploader(
                 label="엑셀 파일 업로드",
                 type=["xlsx", "xls"],
@@ -295,10 +462,12 @@ def show_main():
                                 st.subheader("데이터 미리보기")
                             with st.container(border=False, horizontal=True, horizontal_alignment="right"):
                                 if st.session_state["is_valid"]:
-                                    st.toggle(label="Sign off", key="sign_off", help="활성화 상태로 데이터 저장시 기존 SIGN_OFF 상태의 데이터를 삭제 후 재업로드 합니다.")
+                                    if st.session_state.get("user_role", "") == "ADMIN":
+                                        st.toggle(label="Sign off", key="sign_off", help="활성화 상태로 데이터 저장시 기존 SIGN_OFF 상태의 데이터를 삭제 후 재업로드 합니다.")
                                     st.button(label="데이터 저장", type="primary", on_click=save_btn)
 
                         st.dataframe(df, width="stretch")
+                        st.write(len(df))
 
                 except Exception as e:
                     # 예상치 못한 시스템 치명적 에러 핸들링
