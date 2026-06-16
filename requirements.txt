@@ -5,3 +5,4 @@ cryptography
 requests
 streamlit-oauth
 openpyxl
+streamlit_antd_components
