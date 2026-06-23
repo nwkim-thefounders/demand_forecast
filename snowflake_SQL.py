@@ -13,7 +13,7 @@ def connect_snowflake():
     key = st.secrets["snowflake"]["key"]
 
     p_key = serialization.load_pem_private_key(
-        key.encode(),
+        key.strip().encode(),
         password=None
     )
 

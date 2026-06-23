@@ -1,6 +1,7 @@
 streamlit
 pandas
-snowflake-sqlalchemy
+snowflake-sqlalchemy==1.6.1
+snowflake-connector-python==3.12.4
 cryptography
 requests
 streamlit-oauth
