@@ -384,7 +384,7 @@ def show_dashboard(df: pd.DataFrame) -> None:
     with st.expander("상세 검색", expanded=True):
         filter_cols = st.columns(len(selected_levels))
         for i, level in enumerate(selected_levels):
-            unique_vals = sorted(df[level].astype(str).unique().tolist())
+            unique_vals = sorted(df[level].fillna("").astype(str).unique().tolist())
             selected_vals = filter_cols[i].multiselect(
                 LEVEL_LABELS[level],
                 options=unique_vals,
