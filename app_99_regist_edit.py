@@ -113,15 +113,20 @@ def _merge_product_master(df: pd.DataFrame, use_cache: bool = True) -> pd.DataFr
 
     Returns:
         pd.DataFrame: 품목명, 라인, 대분류, 중분류, 용량, 유통코드, 버전 콜럼이 추가된 DataFrame.
+                      merge 실패 시 원본 df를 그대로 반환한다.
     """
-    if "DESC" in df.columns:
-        df = df.drop(columns=["DESC"])
-    product_master = app_cache_load.load_product_master(use_cache=use_cache)
-    product_master = product_master.rename(columns={
-        "품목코드":        "SKU",
-        "요청_품목명_국문": "품목명",
-    })
-    return df.merge(product_master, on="SKU", how="left")
+    try:
+        if "DESC" in df.columns:
+            df = df.drop(columns=["DESC"])
+        product_master = app_cache_load.load_product_master(use_cache=use_cache)
+        product_master = product_master.rename(columns={
+            "품목코드":        "SKU",
+            "요청_품목명_국문": "품목명",
+        })
+        return df.merge(product_master, on="SKU", how="left")
+    except Exception as e:
+        logger.warning("PRODUCT_MASTER merge 실패, 원본 df 반환: %s", e)
+        return df
 
 
 def _result_df_edit(df: pd.DataFrame) -> pd.DataFrame:
@@ -359,10 +364,9 @@ def show_dashboard(df: pd.DataFrame) -> None:
         options=LEVEL_OPTIONS,
         default=LEVEL_OPTIONS,
         format_func=lambda x: LEVEL_LABELS[x],
-        key="dash_levels",
     )
 
-    # 세션 잔류값 등으로 df에 없는 컬럼이 selected_levels에 포함될 수 있으므로 방어 필터
+    # df에 실제로 존재하는 컬럼만 유지 (PRODUCT_MASTER merge 실패 등으로 컬럼 부재 대비)
     selected_levels = [c for c in selected_levels if c in df.columns]
 
     if not selected_levels:
