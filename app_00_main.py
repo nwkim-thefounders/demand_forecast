@@ -8,7 +8,7 @@ import streamlit_antd_components as sac
 def show_main() -> None:
     """Streamlit 메인 페이지를 렌더링한다.
 
-    로그인 상태에 따라 로그인 화면 또는 상단 네비게이션 바(Up Load / Edit)를 표시한다.
+    로그인 상태에 따라 로그인 화면 또는 상단 네비게이션 바(Up Load / View)를 표시한다.
     기본 페이지는 Up Load 탭이다.
     """
     st.set_page_config(
@@ -22,7 +22,7 @@ def show_main() -> None:
 
     nav_items = [
         sac.TabsItem(label="Up Load", icon="cloud-upload"),
-        sac.TabsItem(label="Edit", icon="pencil-square"),
+        sac.TabsItem(label="View", icon="eye"),
     ]
 
     selected_tab = sac.tabs(
@@ -35,7 +35,7 @@ def show_main() -> None:
         use_container_width=False,
     )
 
-    if selected_tab == "Edit":
+    if selected_tab == "View":
         app_99_regist_edit.show_edit_page()
     else:
         app_02_upload.show_upload_page()
