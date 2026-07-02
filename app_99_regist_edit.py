@@ -694,10 +694,15 @@ def show_dashboard(df: pd.DataFrame) -> None:
 
 
 def show_edit_page() -> None:
-    """ADMIN 전용 Edit 탭 페이지를 렌더링한다.
+    """View 탭 페이지를 렌더링한다.
 
     사이드바 검색 필터와 검색 결과 대시보드로 구성된다.
     """
+    st.caption(
+        """등록된 예측 수량 데이터를 조회하고 계층별 피벗 테이블·KPI·추이 그래프로 시각화합니다.
+        왼쪽 사이드바에서 등록 월·예측 월·사업부·채널·등록자 조건을 설정한 뒤 **검색** 버튼을 눌러주세요."""
+    )
+
     if "option_df" not in st.session_state:
         init_data()
 
