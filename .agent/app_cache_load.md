@@ -1,56 +1,53 @@
 # app_cache_load.py — 코드 리뷰
 
 ## 파일 목적
-Snowflake `ALLOWED_USERS` 테이블을 캐시하여 로그인 검증 속도를 향상시키는 유틸리티 모듈.
-`@st.cache_data` 데코레이터로 최초 1회만 DB 조회 후 메모리에 보관한다.
+Snowflake 데이터를 캐시하여 로딩 속도를 향상시키는 유틸리티 모듈.
+- `ALLOWED_USERS` 테이블: 로그인 검증용
+- `PRODUCT_MASTER` 테이블: 품목명·라인·대분류·중분류·용량·유통코드·버전 정보
+
+`use_cache` 파라미터로 캐시 사용 여부를 런타임에 제어할 수 있다 (streamlit_guide §4 준수).
 
 ---
 
 ## 함수 목록 및 위치
 
-| 함수명 | 라인 | 설명 |
+| 함수명 | 라인(약) | 설명 |
 |---|---|---|
-| `load_users_data()` | 6~13 | ALLOWED_USERS 테이블 전체 로드 및 컬럼 대문자 변환 |
+| `_load_product_master_cached()` | 8~11 | PRODUCT_MASTER 캐시 로드 (TTL 3600s) — 내부 전용 |
+| `_load_users_data_cached()` | 14~17 | ALLOWED_USERS 캐시 로드 (TTL 300s) — 내부 전용 |
+| `_fetch_product_master()` | 22~38 | PRODUCT_MASTER Snowflake 직접 조회 — 내부 전용 |
+| `_fetch_users_data()` | 41~55 | ALLOWED_USERS Snowflake 직접 조회 — 내부 전용 |
+| `load_product_master(use_cache)` | 60~74 | 공개 인터페이스: use_cache=True이면 캐시 버전 반환 |
+| `load_users_data(use_cache)` | 77~91 | 공개 인터페이스: use_cache=True이면 캐시 버전 반환 |
 
 ---
 
-## 발견된 버그 / 개선 필요 사항
+## 캐시 제어 구조
 
-### 🟠 HIGH (지침 위반)
+```
+load_product_master(use_cache=True)  ──→  _load_product_master_cached()  ──→  _fetch_product_master()
+                   (use_cache=False) ──→  _fetch_product_master()  (직접 조회)
 
-1. **타입 힌트 누락** (지침서 §2 위반)
-   ```python
-   def load_users_data():
-   # 수정
-   def load_users_data() -> pd.DataFrame:
-   ```
+load_users_data(use_cache=True)      ──→  _load_users_data_cached()       ──→  _fetch_users_data()
+               (use_cache=False)     ──→  _fetch_users_data()  (직접 조회)
+```
 
-2. **Google Style Docstring 불완전** (지침서 §2 위반)
-   Docstring은 존재하나 `Returns:` 및 `Raises:` 섹션이 없다.
-
----
-
-### 🟡 MEDIUM (코드 품질)
-
-3. **`@st.cache_data`에 `ttl` 미지정**
-   유저 데이터가 DB에서 변경되어도 앱 재시작 전까지 반영되지 않는다. `ttl=300` 등 설정 권장.
-
-4. **`SELECT *` 쿼리 사용**
-   필요한 컬럼(EMAIL, USER_NAME, ROLE, USER_PW)만 명시적으로 조회하는 것이 안전하다.
-
----
-
-### 🟢 LOW
-
-5. **파일 전체가 14줄로 매우 짧음** — `connect_snowflake` 호출을 함수 내부에서 완전히 캡슐화하는 현재 구조는 좋음.
+UI 토글은 `app_99_regist_edit.py` 사이드바의 "캐시 설정" expander에서 제어한다.
 
 ---
 
 ## 전체 흐름 요약
 
 ```
-load_users_data()
-└── snowflake_SQL.connect_snowflake() → engine
-    └── query_to_snowflake_with_text("SELECT * FROM ALLOWED_USERS")
-        └── df.columns 대문자 변환 → 반환
+load_product_master(use_cache) / load_users_data(use_cache)
+├── use_cache=True  → @st.cache_data 캐시 함수 호출
+└── use_cache=False → _fetch_* 직접 Snowflake 조회
+    └── snowflake_SQL.connect_snowflake() → engine
+        └── query_to_snowflake_with_text(query, conn) → DataFrame 반환
 ```
+
+---
+
+## 최종 수정 이력
+- 2026-07-02: 캐시/비캐시 분리 리팩토링, use_cache 파라미터 추가 (streamlit_guide §4 준수)
+- `load_product_master`에 라인·대분류·중분류·용량·유통코드·버전 컬럼 추가

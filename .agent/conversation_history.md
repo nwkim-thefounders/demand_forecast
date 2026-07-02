@@ -128,3 +128,34 @@ delta = cur - prv  # 0 - prv = 음수 (혹은 prv 카드는 0으로 표기)
   database = "TESTDB"
   schema = "PUBLIC"
   ```
+
+---
+
+## [2026-07-02] 세션 — 전체 리팩토링 (streamlit_guide.md + .windsurf 지침 반영)
+
+### 요청
+- `streamlit_guide.md` 신규 생성 및 `.windsurf`에 등록 후 전체 리팩토링 요청
+
+### 변경 파일 및 주요 내용
+
+#### `app_cache_load.py`
+- 캐시/비캐시 분리: `_fetch_*` (직접 조회) + `_*_cached` (캐시) + 공개 `load_*(use_cache)` 구조
+- `load_product_master(use_cache=True)`, `load_users_data(use_cache=True)` 파라미터 추가
+
+#### `app_99_regist_edit.py`
+- `get_option_df` → `_fetch_option_df` + `_get_option_df_cached` + `get_option_df(use_cache)` 분리
+- `_result_df_edit()` — Google Style Docstring 추가
+- `_build_pivot_df(df, selected_levels)` — 피벗 로직 `show_dashboard`에서 분리 (§3 준수)
+- `_calc_kpi_delta(df, fcst_mth_list)` — KPI delta 계산 로직 분리 (§3 준수)
+- `_merge_product_master(df, use_cache)` — `use_cache` 파라미터 추가
+- `_render_sidebar()` — "캐시 설정" expander + `use_option_cache` / `use_product_cache` 토글 추가 (§4 준수)
+- `init_data()`, `search_data()` — 세션 캐시 토글 값 참조
+
+#### `.agent/*.md`
+- `app_cache_load.md`, `app_99_regist_edit.md` 함수 목록 및 현황 최신화
+
+#### `tests/test_logic.py` (신규)
+- `TestResultDfEdit`: 4개 테스트
+- `TestBuildPivotDf`: 5개 테스트
+- `TestCalcKpiDelta`: 5개 테스트
+- **14/14 PASSED** (pytest 실행 확인)

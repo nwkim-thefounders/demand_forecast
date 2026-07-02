@@ -20,16 +20,10 @@ def show_main() -> None:
         app_01_login.show_login()
         return
 
-    # 관리자만 Edit 탭 볼 수 있도록 설정
-    if st.session_state.get("user_role", "") == "ADMIN":
-        nav_items = [
-            sac.TabsItem(label="Up Load", icon="cloud-upload"),
-            sac.TabsItem(label="Edit", icon="pencil-square"),
-        ]
-    else:
-        nav_items = [
-            sac.TabsItem(label="Up Load", icon="cloud-upload"),
-        ]
+    nav_items = [
+        sac.TabsItem(label="Up Load", icon="cloud-upload"),
+        sac.TabsItem(label="Edit", icon="pencil-square"),
+    ]
 
     selected_tab = sac.tabs(
         items=nav_items,
