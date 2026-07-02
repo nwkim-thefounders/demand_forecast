@@ -389,7 +389,6 @@ def show_dashboard(df: pd.DataFrame) -> None:
                 LEVEL_LABELS[level],
                 options=unique_vals,
                 default=[],
-                key=f"pivot_filter_{level}",
             )
             if selected_vals:
                 df = df[df[level].astype(str).isin(selected_vals)]
