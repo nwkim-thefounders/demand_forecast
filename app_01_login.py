@@ -1,11 +1,14 @@
 import streamlit as st
 from streamlit_oauth import OAuth2Component
 import requests
+import logging
 import snowflake_SQL
 import app_cache_load
 import re
 import pandas as pd
 import urllib.parse  # URL 쿼리 스트링 빌드용 추가
+
+logger = logging.getLogger(__name__)
 
 # --- 1. 설정값 및 OAuth 초기화 ---
 CLIENT_ID = st.secrets["slack"]["client_id"]
@@ -16,7 +19,8 @@ TOKEN_URL = "https://slack.com/api/oauth.v2.access"
 
 oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_URL, TOKEN_URL, TOKEN_URL, "")
 
-def check_email():
+def check_email() -> None:
+    """세션의 이메일 입력값에 대한 형식 유효성 검사를 수행하고 결과를 세션에 저장한다."""
     input_em = st.session_state.get("input_em", "")
     email_pattern = r'^[a-zA-Z0-9+-_.]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
 
@@ -28,7 +32,8 @@ def check_email():
             st.session_state["is_valueable"] = True
             st.session_state["login_warning_msg"] = ""
 
-def login_btn():
+def login_btn() -> None:
+    """이메일/비밀번호 로그인 버튼 콜백. DB 조회 후 세션에 인증 상태를 저장한다."""
     check_email()
     if not st.session_state.get("is_valueable", False):
         return
@@ -36,7 +41,7 @@ def login_btn():
     input_em = st.session_state.get("input_em", "")
     input_pw = st.session_state.get("input_pw", "")
 
-    if input_pw == "" or input_pw == None:
+    if input_pw == "" or input_pw is None:
         st.session_state["is_valueable"] = False
         st.session_state["login_warning_msg"] = "비밀번호를 입력 해주세요"
         return
@@ -54,14 +59,24 @@ def login_btn():
     st.session_state['user_name_kr'] = user_data.loc[user_data["EMAIL"] == input_em, "USER_NAME"].iloc[0]
     st.session_state['user_role'] = user_data.loc[user_data["EMAIL"] == input_em, "ROLE"].iloc[0]
 
-def regist_user(email: str, name: str):
+def regist_user(email: str, name: str) -> None:
+    """신규 Slack 사용자를 ALLOWED_USERS 테이블에 등록한다.
+
+    Args:
+        email (str): 등록할 사용자 이메일 주소.
+        name (str): 등록할 사용자 실명.
+    """
     engine = snowflake_SQL.connect_snowflake()
     created_at = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
     with engine.connect() as conn:
         query = f"INSERT INTO ALLOWED_USERS (EMAIL, USER_NAME, ROLE, CREATED_AT) VALUES ('{email}', '{name}', 'USER', '{created_at}');"
         snowflake_SQL.query_to_snowflake_with_text(query=query, conn=conn)
 
-def show_login():
+def show_login() -> None:
+    """Slack OAuth2 및 이메일/비밀번호 이중 로그인 화면을 렌더링한다.
+
+    Slack redirect code 감지 → 토큰 교환 → 유저 등록/조회 → 세션 저장 순서로 처리한다.
+    """
     if "user_data" not in st.session_state:
         st.session_state["user_data"] = app_cache_load.load_users_data()
 

@@ -1,20 +1,35 @@
 import streamlit as st
 import snowflake_SQL
-from datetime import datetime
+import pandas as pd
+import logging
+import plotly.graph_objects as go
+from typing import Optional
 
-this_month_int = int(datetime.now().strftime("%Y%m"))
+logger = logging.getLogger(__name__)
 
-@st.cache_data(show_spinner=False)
-def get_option_df():
+
+@st.cache_data(show_spinner=False, ttl=600)
+def get_option_df() -> pd.DataFrame:
+    """MONTH_FORECAST_CONSOL 테이블에서 필터 옵션용 distinct 데이터를 조회한다.
+
+    Returns:
+        pd.DataFrame: FCST_MTH, DEPT, CHANNEL, MONTH, REGISTANT distinct 목록.
+
+    Raises:
+        Exception: Snowflake 연결 또는 쿼리 실행 실패 시.
+    """
     engine = snowflake_SQL.connect_snowflake()
     with engine.connect() as conn:
-        df = snowflake_SQL.query_to_snowflake_with_text(conn=conn, query="SELECT DISTINCT FCST_MTH, DEPT, CHANNEL, MONTH, REGISTANT FROM MONTH_FORECAST_CONSOL;")
-    
+        df = snowflake_SQL.query_to_snowflake_with_text(
+            conn=conn,
+            query="SELECT DISTINCT FCST_MTH, DEPT, CHANNEL, MONTH, REGISTANT FROM TESTDB.PUBLIC.MONTH_FORECAST_CONSOL;"
+        )
     df.columns = [col.upper() for col in df.columns]
-
     return df
 
-def init_data():
+
+def init_data() -> None:
+    """세션 상태에 필터 옵션 목록을 초기화한다."""
     df = get_option_df()
     st.session_state["option_df"] = df.copy()
     st.session_state["fcst_month_list"] = sorted(df["FCST_MTH"].drop_duplicates().dropna().tolist())
@@ -23,38 +38,546 @@ def init_data():
     st.session_state["channel_list"] = sorted(df["CHANNEL"].drop_duplicates().dropna().tolist())
     st.session_state["registant_list"] = sorted(df["REGISTANT"].drop_duplicates().dropna().tolist())
 
-def show_edit_page():
-    if "option_df" not in st.session_state:
-        init_data()
 
+def search_data() -> None:
+    """사이드바 필터 조건으로 Snowflake 데이터를 조회하여 세션에 저장한다."""
+    fcst_range = st.session_state.get("selectedfcst_month", (None, None))
+    target_range = st.session_state.get("selected_target_month", (None, None))
+    selected_dept = st.session_state.get("selected_dept", [])
+    selected_channel = st.session_state.get("selected_channel", [])
+    selected_registant = st.session_state.get("selected_registant", [])
+
+    # WHERE 절 조건 조립
+    conditions = []
+    if fcst_range[0] and fcst_range[1]:
+        conditions.append(f"FCST_MTH BETWEEN {fcst_range[0]} AND {fcst_range[1]}")
+    if target_range[0] and target_range[1]:
+        conditions.append(f"MONTH BETWEEN {target_range[0]} AND {target_range[1]}")
+    if selected_dept:
+        dept_list_str = ", ".join([f"'{d}'" for d in selected_dept])
+        conditions.append(f"DEPT IN ({dept_list_str})")
+    if selected_channel:
+        ch_list_str = ", ".join([f"'{c}'" for c in selected_channel])
+        conditions.append(f"CHANNEL IN ({ch_list_str})")
+    if selected_registant:
+        reg_list_str = ", ".join([f"'{r}'" for r in selected_registant])
+        conditions.append(f"REGISTANT IN ({reg_list_str})")
+
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
+    query = f"SELECT * FROM TESTDB.PUBLIC.MONTH_FORECAST_CONSOL WHERE {where_clause};"
+
+    try:
+        engine = snowflake_SQL.connect_snowflake()
+        with engine.connect() as conn:
+            result_df = snowflake_SQL.query_to_snowflake_with_text(query=query, conn=conn)
+        result_df.columns = [col.upper() for col in result_df.columns]
+        result_df = _result_df_edit(result_df)
+        st.session_state["edit_result_df"] = result_df
+    except Exception as e:
+        logger.error("Edit 탭 검색 중 오류 발생: %s", e)
+        st.session_state["edit_result_df"] = None
+        st.error(f"검색 중 오류가 발생했습니다: {e}")
+
+def _result_df_edit(df: pd.DataFrame) -> pd.DataFrame:
+    # KEY = FCST_MTH + DEPT + CHANNEL (SIGNOFF_DT, REGISTANT 제외)
+    df["KEY"] = df["FCST_MTH"].astype(str) + "_" + df["DEPT"].astype(str) + "_" + df["CHANNEL"].astype(str)
+ 
+    # 1. 키별 SIGNOFF_DT 최신값만 남기기 (NaT인 행은 그대로 통과)
+    df["SIGNOFF_DT"] = pd.to_datetime(df["SIGNOFF_DT"], errors="coerce", format="mixed")
+    max_dt = df.groupby("KEY")["SIGNOFF_DT"].transform("max")
+    df = df[df["SIGNOFF_DT"].isna() | (df["SIGNOFF_DT"] == max_dt)]
+ 
+    # 2. SIGNOFF 상태가 있는 키 추출
+    sign_off_keys = set(df[df["SIGN_STATUS"] == "SIGNOFF"]["KEY"].unique())
+ 
+    # 3. SIGNOFF 있는 키 → SIGNOFF 행만, 없는 키 → 그대로
+    if sign_off_keys:
+        df = df[
+            (df["KEY"].isin(sign_off_keys) & (df["SIGN_STATUS"] == "SIGNOFF")) |
+            (~df["KEY"].isin(sign_off_keys))
+        ]
+ 
+    # 4. KEY 컬럼 삭제
+    df = df.drop("KEY", axis=1).reset_index(drop=True)
+    return df
+
+
+
+def _render_sidebar() -> None:
+    """Edit 탭 사이드바 필터 UI를 렌더링한다."""
     with st.sidebar:
         fcst_month_list = st.session_state.get("fcst_month_list", [])
-        st.caption("MONTH_FORECAST_CONSOL 테이블 검색")
-        st.select_slider(label="등록 월 - FCST_MTH", options=fcst_month_list, value=(fcst_month_list[-2], fcst_month_list[-1]), key="selectedfcst_month")
-
         target_month_list = st.session_state.get("target_month_list", [])
-        st.select_slider(label="예측 월 - MONTH", options=target_month_list, value=(target_month_list[-2], target_month_list[-1]), key="selected_target_month")
-
         dept_list = st.session_state.get("dept_list", [])
-        st.multiselect(label="사업부 - DEPT", options=dept_list, key="selected_dept")
-
         channel_list = st.session_state.get("channel_list", [])
-        st.multiselect(label="채널 - CHANNEL", options=channel_list, key="selected_channel")
-
         registant_list = st.session_state.get("registant_list", [])
+
+        st.caption("MONTH_FORECAST_CONSOL 테이블 검색")
+
+        if len(fcst_month_list) >= 2:
+            st.select_slider(
+                label="등록 월 - FCST_MTH",
+                options=fcst_month_list,
+                value=(fcst_month_list[-2], fcst_month_list[-1]),
+                key="selectedfcst_month"
+            )
+        elif len(fcst_month_list) == 1:
+            st.select_slider(
+                label="등록 월 - FCST_MTH",
+                options=fcst_month_list,
+                value=(fcst_month_list[0], fcst_month_list[0]),
+                key="selectedfcst_month"
+            )
+        else:
+            st.session_state["selectedfcst_month"] = (None, None)
+            st.info("등록 월 데이터 없음")
+
+        if len(target_month_list) >= 2:
+            st.select_slider(
+                label="예측 월 - MONTH",
+                options=target_month_list,
+                value=(target_month_list[-2], target_month_list[-1]),
+                key="selected_target_month"
+            )
+        elif len(target_month_list) == 1:
+            st.select_slider(
+                label="예측 월 - MONTH",
+                options=target_month_list,
+                value=(target_month_list[0], target_month_list[0]),
+                key="selected_target_month"
+            )
+        else:
+            st.session_state["selected_target_month"] = (None, None)
+            st.info("예측 월 데이터 없음")
+
+        st.multiselect(label="사업부 - DEPT", options=dept_list, key="selected_dept")
+        st.multiselect(label="채널 - CHANNEL", options=channel_list, key="selected_channel")
         st.multiselect(label="등록자 - REGISTANT", options=registant_list, key="selected_registant")
 
         st.write("")
-        st.write("")
-        st.write(f"검색할 데이터")
-        st.write(f"FCST_MTH : {st.session_state.get("selectedfcst_month")[0]} ~ {st.session_state.get("selectedfcst_month")[1]}")
-        st.write(f"MONTH : {st.session_state.get("selected_target_month")[0]} ~ {st.session_state.get("selected_target_month")[1]}")
-        st.write(f"DEPT : {', '.join(st.session_state.get("selected_dept", []))}")
-        st.write(f"CHANNEL : {', '.join(st.session_state.get("selected_channel", []))}")
-        st.write(f"REGISTANT : {', '.join(st.session_state.get("selected_registant", []))}")
+        fcst_range = st.session_state.get("selectedfcst_month", (None, None))
+        target_range = st.session_state.get("selected_target_month", (None, None))
+        dept_str = ", ".join(st.session_state.get("selected_dept", []))
+        channel_str = ", ".join(st.session_state.get("selected_channel", []))
+        registant_str = ", ".join(st.session_state.get("selected_registant", []))
 
-        with st.container(border=False, horizontal=False, horizontal_alignment="right"):
-            st.write("")
-            st.button(label="검색", type="primary")
-    
-    st.write(st.session_state.get("target_month_list"))
+        with st.expander("검색 조건 확인", expanded=False):
+            st.write(f"FCST_MTH : {fcst_range[0]} ~ {fcst_range[1]}")
+            st.write(f"MONTH : {target_range[0]} ~ {target_range[1]}")
+            st.write(f"DEPT : {dept_str}")
+            st.write(f"CHANNEL : {channel_str}")
+            st.write(f"REGISTANT : {registant_str}")
+
+        st.write("")
+        st.button(label="검색", type="primary", on_click=search_data, width="stretch")
+
+
+def show_dashboard(df: pd.DataFrame) -> None:
+    """검색 결과 DataFrame을 다중 선택 계층 기반 피벗 테이블로 표시한다.
+
+    선택한 계층 컬럼 순서가 행 index가 되고, MONTH가 열이 되어
+    FORECAST_QTY 합계를 피벗 테이블로 렌더링한다.
+
+    Args:
+        df (pd.DataFrame): search_data()로 조회된 결과 DataFrame.
+    """
+    df = df.copy()
+    df["FORECAST_QTY"] = pd.to_numeric(df["FORECAST_QTY"], errors="coerce").fillna(0)
+    df["MONTH"] = df["MONTH"].astype(str)
+    df["FCST_MTH"] = df["FCST_MTH"].astype(str)
+
+    # ── 계층 다중 선택 ────────────────────────────────────────────
+    LEVEL_OPTIONS = ["FCST_MTH", "DEPT", "CHANNEL", "SKU"]
+    LEVEL_LABELS  = {
+        "FCST_MTH": "등록 월 (FCST_MTH)",
+        "DEPT":     "사업부 (DEPT)",
+        "CHANNEL":  "채널 (CHANNEL)",
+        "SKU":      "SKU",
+    }
+
+    selected_levels: list = st.multiselect(
+        "행 계층 선택 (순서대로 계층 구성, MONTH는 열로 고정)",
+        options=LEVEL_OPTIONS,
+        default=["DEPT", "CHANNEL"],
+        format_func=lambda x: LEVEL_LABELS[x],
+        key="dash_levels",
+    )
+
+    if not selected_levels:
+        st.info("행 계층을 1개 이상 선택해주세요.")
+        return
+
+    # ── KPI 카드 ──────────────────────────────────────────────────
+    total_qty = int(df["FORECAST_QTY"].sum())
+    fcst_mth_list = sorted(df["FCST_MTH"].unique().tolist())
+
+    # 등록 월 2개 이상: 최신 월 vs 전월 대비 delta 계산
+    qty_delta = None
+    qty_delta_label = None
+    if len(fcst_mth_list) >= 2:
+        latest_mth = fcst_mth_list[-1]
+        prev_mth = fcst_mth_list[-2]
+        latest_qty = int(df[df["FCST_MTH"] == latest_mth]["FORECAST_QTY"].sum())
+        prev_qty = int(df[df["FCST_MTH"] == prev_mth]["FORECAST_QTY"].sum())
+        qty_delta = latest_qty - prev_qty
+        qty_delta_label = f"{qty_delta:+,} (vs {prev_mth}→{latest_mth})"
+
+    # ── 선택 계층별 동적 검색 필터 ────────────────────────────────
+    with st.expander("상세 필터", expanded=True):
+        filter_cols = st.columns(len(selected_levels))
+        for i, level in enumerate(selected_levels):
+            unique_vals = sorted(df[level].astype(str).unique().tolist())
+            selected_vals = filter_cols[i].multiselect(
+                LEVEL_LABELS[level],
+                options=unique_vals,
+                default=[],
+                key=f"pivot_filter_{level}",
+            )
+            if selected_vals:
+                df = df[df[level].astype(str).isin(selected_vals)]
+
+    st.write("")
+
+    kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+    with kpi1:
+        st.metric("총 예측 수량", f"{total_qty:,}", delta=qty_delta_label)
+    with kpi2:
+        st.metric("SKU 수", f"{df['SKU'].nunique():,}")
+    with kpi3:
+        st.metric("채널 수", f"{df['CHANNEL'].nunique():,}")
+    with kpi4:
+        st.metric("예측 월 수", f"{df['MONTH'].nunique():,}")
+
+    # ── 선택 계층별 delta metric ──────────────────────────────────
+    if len(fcst_mth_list) >= 2:
+        latest_mth = fcst_mth_list[-1]
+        prev_mth   = fcst_mth_list[-2]
+        with st.expander(f"계층별 수량 변화 ({prev_mth} → {latest_mth}) `Delta`", expanded=False):
+            delta_level = st.radio(
+                "기준 계층 선택",
+                options=LEVEL_OPTIONS,
+                format_func=lambda x: LEVEL_LABELS[x],
+                horizontal=True,
+                key="delta_level_radio",
+            )
+            level_vals = sorted(df[delta_level].astype(str).unique().tolist())
+            cols = st.columns(min(len(level_vals), 6))
+            for i, val in enumerate(level_vals):
+                # FCST_MTH 자체가 계층일 경우: val이 곧 등록월이므로
+                # val_df 필터와 FCST_MTH 비교가 중복되어 delta가 0이 되는 문제 방지
+                def _pct_str(diff: int, base: int) -> str:
+                    if base == 0:
+                        return ""
+                    return f" ({diff / base * 100:+.1f}%)"
+
+                if delta_level == "FCST_MTH":
+                    cur = int(df[df["FCST_MTH"] == latest_mth]["FORECAST_QTY"].sum()) if val == latest_mth else 0
+                    prv = int(df[df["FCST_MTH"] == prev_mth]["FORECAST_QTY"].sum()) if val == prev_mth else 0
+                    # 최신월 카드: value=최신월 수량, delta=최신-전월
+                    # 전월 카드: value=전월 수량, delta=전월-최신월 (기준 대비 변화)
+                    latest_total = int(df[df["FCST_MTH"] == latest_mth]["FORECAST_QTY"].sum())
+                    prev_total = int(df[df["FCST_MTH"] == prev_mth]["FORECAST_QTY"].sum())
+                    if val == latest_mth:
+                        d = latest_total - prev_total
+                        display_val = latest_total
+                        display_delta = f"{d:+,}{_pct_str(d, prev_total)}"
+                    elif val == prev_mth:
+                        d = prev_total - latest_total
+                        display_val = prev_total
+                        display_delta = f"{d:+,}{_pct_str(d, latest_total)}"
+                    else:
+                        display_val = int(df[df["FCST_MTH"] == val]["FORECAST_QTY"].sum())
+                        display_delta = None
+                else:
+                    val_df = df[df[delta_level].astype(str) == val]
+                    cur = int(val_df[val_df["FCST_MTH"] == latest_mth]["FORECAST_QTY"].sum())
+                    prv = int(val_df[val_df["FCST_MTH"] == prev_mth]["FORECAST_QTY"].sum())
+                    delta = cur - prv
+                    display_val = cur
+                    display_delta = f"{delta:+,}{_pct_str(delta, prv)}"
+                with cols[i % 6]:
+                    with st.container(border=True):
+                        st.metric(
+                            label=val,
+                            value=f"{display_val:,}",
+                            delta=display_delta,
+                        )
+
+    st.write("")
+
+    # ── 변화량 비교 그래프 ────────────────────────────────────────
+    if len(fcst_mth_list) >= 2:
+        latest_mth = fcst_mth_list[-1]
+        prev_mth   = fcst_mth_list[-2]
+        with st.expander(f"변화량 비교 그래프 ({prev_mth} → {latest_mth})", expanded=False):
+            # 채널 계층 포함 여부 선택
+            use_channel = st.toggle("채널(CHANNEL) 계층 포함", value=False, key="chart_use_channel")
+            group_cols = ["DEPT", "CHANNEL"] if use_channel else ["DEPT"]
+
+            # 예측 월(MONTH) 필터
+            month_list_all = sorted(df["MONTH"].astype(str).unique().tolist())
+            selected_chart_months = st.multiselect(
+                "표시할 예측 월 선택 (비우면 전체)",
+                options=month_list_all,
+                default=[],
+                key="chart_month_filter",
+            )
+            chart_df = df.copy()
+            if selected_chart_months:
+                chart_df = chart_df[chart_df["MONTH"].astype(str).isin(selected_chart_months)]
+
+            # 계층별 집계 — x=MONTH, 선=계층+등록월 조합
+            grp_keys = group_cols + ["MONTH"]
+            agg_latest = (
+                chart_df[chart_df["FCST_MTH"].astype(str) == str(latest_mth)]
+                .groupby(grp_keys)["FORECAST_QTY"].sum().reset_index()
+            )
+            agg_prev = (
+                chart_df[chart_df["FCST_MTH"].astype(str) == str(prev_mth)]
+                .groupby(grp_keys)["FORECAST_QTY"].sum().reset_index()
+            )
+
+            all_months = sorted(
+                set(agg_latest["MONTH"].astype(str).tolist()) |
+                set(agg_prev["MONTH"].astype(str).tolist())
+            )
+
+            # 계층 고유값 (DEPT or DEPT+CHANNEL)
+            def _grp_key(frame: pd.DataFrame) -> pd.Series:
+                return frame[group_cols].astype(str).apply("|".join, axis=1)
+
+            all_groups = sorted(
+                set(list(_grp_key(agg_latest))) |
+                set(list(_grp_key(agg_prev)))
+            )
+
+            chart_tab1, chart_tab2 = st.tabs(["등록월 비교", "변화량 (Delta)"])
+
+            # 색상 팔레트
+            palette_prev   = ["#6c8ebf", "#82b366", "#9673a6", "#d6a520", "#ae4132", "#4d9696"]
+            palette_latest = ["#d79b00", "#23445d", "#6a9153", "#5a3d6b", "#a0522d", "#1f6f6f"]
+
+            with chart_tab1:
+                st.caption(f"""
+💡 **사용법**
+- 우측 범례에서 특정 사업부를 클릭하면 해당 선만 표기/미표기 변경 가능합니다.
+- 예) *북미({prev_mth})* 와 *북미({latest_mth})* 만 선택하면 북미의 등록월별 수량 변화를 확인할 수 있습니다.
+- 더블클릭 시 해당 선만 단독 표시됩니다.
+""")
+                fig1 = go.Figure()
+                for gi, grp in enumerate(all_groups):
+                    # 전월 선
+                    sub_prev = agg_prev[
+                        _grp_key(agg_prev) == grp
+                    ].sort_values("MONTH")
+                    fig1.add_trace(go.Scatter(
+                        name=f"{grp} ({prev_mth})",
+                        x=sub_prev["MONTH"].astype(str),
+                        y=sub_prev["FORECAST_QTY"],
+                        mode="lines+markers",
+                        line=dict(color=palette_prev[gi % len(palette_prev)], dash="dot", width=2),
+                        marker=dict(size=6),
+                    ))
+                    # 최신월 선
+                    sub_latest = agg_latest[
+                        _grp_key(agg_latest) == grp
+                    ].sort_values("MONTH")
+                    fig1.add_trace(go.Scatter(
+                        name=f"{grp} ({latest_mth})",
+                        x=sub_latest["MONTH"].astype(str),
+                        y=sub_latest["FORECAST_QTY"],
+                        mode="lines+markers",
+                        line=dict(color=palette_latest[gi % len(palette_latest)], width=2),
+                        marker=dict(size=6),
+                    ))
+                fig1.update_layout(
+                    xaxis_title="예측 월 (MONTH)",
+                    xaxis=dict(type="category", categoryorder="category ascending"),
+                    yaxis_title="FORECAST_QTY",
+                    yaxis=dict(tickformat=",d"),
+                    legend_title="계층 (등록월)",
+                    height=450,
+                    margin=dict(t=30, b=10),
+                    hovermode="x unified",
+                )
+                st.plotly_chart(fig1, use_container_width=True)
+
+            with chart_tab2:
+                st.caption(f"""
+💡 **사용법**
+- 우측 범례에서 사업부를 클릭하여 원하는 계층만 표시할 수 있습니다.
+- 각 선은 *{latest_mth} 등록값 - {prev_mth} 등록값* 의 차이를 나타냅니다.
+- 0선 위는 증가, 아래는 감소를 의미합니다.
+""")
+                fig2 = go.Figure()
+                for gi, grp in enumerate(all_groups):
+                    sub_prev = agg_prev[
+                        _grp_key(agg_prev) == grp
+                    ].sort_values("MONTH").set_index("MONTH")["FORECAST_QTY"]
+                    sub_latest = agg_latest[
+                        _grp_key(agg_latest) == grp
+                    ].sort_values("MONTH").set_index("MONTH")["FORECAST_QTY"]
+                    delta_s = (sub_latest.reindex(all_months, fill_value=0)
+                               - sub_prev.reindex(all_months, fill_value=0))
+                    fig2.add_trace(go.Scatter(
+                        name=grp,
+                        x=delta_s.index.astype(str),
+                        y=delta_s.values,
+                        mode="lines+markers",
+                        line=dict(color=palette_latest[gi % len(palette_latest)], width=2),
+                        marker=dict(size=6),
+                        fill="tozeroy",
+                        fillcolor=f"rgba({int(palette_latest[gi % len(palette_latest)][1:3],16)},"
+                                  f"{int(palette_latest[gi % len(palette_latest)][3:5],16)},"
+                                  f"{int(palette_latest[gi % len(palette_latest)][5:7],16)},0.1)",
+                    ))
+                fig2.add_hline(y=0, line_dash="dash", line_color="gray", line_width=1)
+                fig2.update_layout(
+                    xaxis_title="예측 월 (MONTH)",
+                    xaxis=dict(type="category", categoryorder="category ascending"),
+                    yaxis_title=f"변화량 ({latest_mth} - {prev_mth})",
+                    yaxis=dict(tickformat=",d"),
+                    legend_title="계층",
+                    height=450,
+                    margin=dict(t=30, b=10),
+                    hovermode="x unified",
+                )
+                st.plotly_chart(fig2, use_container_width=True)
+
+    # ── 피벗 테이블 생성 ──────────────────────────────────────────
+    month_cols = sorted(df["MONTH"].unique().tolist())
+
+    pivot_df = (
+        df.groupby(selected_levels + ["MONTH"])["FORECAST_QTY"]
+        .sum()
+        .reset_index()
+        .pivot_table(
+            index=selected_levels,
+            columns="MONTH",
+            values="FORECAST_QTY",
+            aggfunc="sum",
+            fill_value=0,
+        )
+    )
+
+    # 컬럼을 월 순서대로 정렬, MultiIndex 컬럼 단순화
+    pivot_df = pivot_df.reindex(sorted(pivot_df.columns.tolist()), axis=1)
+    pivot_df.columns.name = None
+
+    # 평균 열 및 합계 열 추가
+    pivot_df["평균"] = pivot_df.mean(axis=1).round(0)
+    pivot_df["합계"] = pivot_df.drop(columns=["평균"]).sum(axis=1)
+
+    # MultiIndex → 개별 컬럼으로 변환 (합계 행 추가 전에 먼저 처리)
+    pivot_df = pivot_df.reset_index()
+
+    # 평균 행 추가
+    avg_row = {col: pivot_df[col].mean() for col in pivot_df.columns if col not in selected_levels}
+    for i, col in enumerate(selected_levels):
+        avg_row[col] = "평균" if i == 0 else ""
+
+    # 합계 행 추가 (계층 컬럼은 첫 번째만 "합계", 나머지는 빈 문자열)
+    total_row = {col: pivot_df[col].sum() for col in pivot_df.columns if col not in selected_levels}
+    for i, col in enumerate(selected_levels):
+        total_row[col] = "합계" if i == 0 else ""
+
+    pivot_df = pd.concat(
+        [pivot_df, pd.DataFrame([total_row]), pd.DataFrame([avg_row])],
+        ignore_index=True,
+    )
+
+    hierarchy_label = " - ".join([LEVEL_LABELS[l] for l in selected_levels])
+    st.subheader(f"{hierarchy_label} Pivot")
+    st.caption(f"{', '.join([LEVEL_LABELS[l] for l in selected_levels])}")
+
+    # 월 컬럼 및 합계 컬럼만 숫자 포맷 적용 (계층 컬럼 제외)
+    value_cols = [c for c in pivot_df.columns if c not in selected_levels]
+    fmt = {col: "{:,.0f}" for col in value_cols}
+    month_value_cols = [c for c in value_cols if c not in ("합계", "평균")]
+
+    first_level_col = selected_levels[0]
+
+    def _highlight_summary_rows(row: pd.Series) -> list:
+        """합계·평균 행 전체에 배경색을 적용한다."""
+        val = str(row[first_level_col])
+        if val == "합계":
+            return ["background-color: #cfe2ff"] * len(row)
+        if val == "평균":
+            return ["background-color: #fff3cd"] * len(row)
+        return [""] * len(row)
+
+    def _highlight_summary_cols(col: pd.Series) -> list:
+        """합계·평균 열 전체에 배경색을 적용한다."""
+        if col.name == "합계":
+            return ["background-color: #cfe2ff"] * len(col)
+        if col.name == "평균":
+            return ["background-color: #fff3cd"] * len(col)
+        return [""] * len(col)
+
+    def _highlight_row_max(row: pd.Series) -> list:
+        """데이터 행(합계·평균 행 제외)에서 MONTH 컬럼 최댓값 셀에 초록색 적용."""
+        val = str(row[first_level_col])
+        if val in ("합계", "평균"):
+            return [""] * len(row)
+        month_vals = row[month_value_cols]
+        if month_vals.empty or month_vals.max() == 0:
+            return [""] * len(row)
+        styles = []
+        for col in row.index:
+            if col in month_value_cols and row[col] == month_vals.max():
+                styles.append("background-color: #d4edda; font-weight: bold")
+            else:
+                styles.append("")
+        return styles
+
+    st.markdown(
+        """
+        <style>
+        [data-testid="stDataFrame"] [class*="dvn-scroller"] [class*="gdg"] div[role="columnheader"] {
+            font-weight: 700 !important;
+            color: #000000 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.dataframe(
+        pivot_df.style
+        .format(fmt)
+        .apply(_highlight_summary_rows, axis=1)
+        .apply(_highlight_summary_cols, axis=0)
+        .apply(_highlight_row_max, axis=1),
+        width="stretch",
+        height=min(60 + len(pivot_df) * 35, 600),
+        hide_index=True,
+    )
+    st.caption(f"총 {len(df):,}건")
+
+    display_cols = [c for c in ["FCST_MTH", "DEPT", "CHANNEL", "MONTH", "SKU", "DESC", "FORECAST_QTY", "REGISTANT", "SIGN_STATUS", "SIGNOFF_DT"] if c in df.columns]
+    with st.expander("원본 데이터 보기"):
+        raw_len = len(st.session_state.get("edit_result_df", df))
+        st.caption(f"총 {raw_len:,}건")
+        st.dataframe(df[display_cols].reset_index(drop=True), width="stretch")
+
+
+def show_edit_page() -> None:
+    """ADMIN 전용 Edit 탭 페이지를 렌더링한다.
+
+    사이드바 검색 필터와 검색 결과 대시보드로 구성된다.
+    """
+    if "option_df" not in st.session_state:
+        init_data()
+
+    _render_sidebar()
+
+    result_df = st.session_state.get("edit_result_df")
+    if result_df is None:
+        st.info("사이드바에서 조건을 설정하고 검색 버튼을 눌러주세요.")
+        return
+
+    if result_df.empty:
+        st.warning("조회된 데이터가 없습니다.")
+        return
+
+    st.caption(f"총 {len(result_df):,}건 조회됨")
+    show_dashboard(result_df)
