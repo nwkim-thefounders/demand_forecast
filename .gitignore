@@ -10,3 +10,8 @@ env/
 __pycache__/
 *.pyc
 .DS_Store
+
+# AI 지침서 제외
+.windsurf
+.agent/
+.tests/
