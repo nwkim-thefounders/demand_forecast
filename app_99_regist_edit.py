@@ -362,6 +362,9 @@ def show_dashboard(df: pd.DataFrame) -> None:
         key="dash_levels",
     )
 
+    # 세션 잔류값 등으로 df에 없는 컬럼이 selected_levels에 포함될 수 있으므로 방어 필터
+    selected_levels = [c for c in selected_levels if c in df.columns]
+
     if not selected_levels:
         st.info("행 계층을 1개 이상 선택해주세요.")
         return
