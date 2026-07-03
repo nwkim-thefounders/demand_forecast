@@ -90,19 +90,21 @@ def search_data() -> None:
     where_clause = " AND ".join(conditions) if conditions else "1=1"
     query = f"SELECT * FROM TESTDB.PUBLIC.MONTH_FORECAST_CONSOL WHERE {where_clause};"
 
-    try:
-        engine = snowflake_SQL.connect_snowflake()
-        with engine.connect() as conn:
-            result_df = snowflake_SQL.query_to_snowflake_with_text(query=query, conn=conn)
-        result_df.columns = [col.upper() for col in result_df.columns]
-        result_df = _result_df_edit(result_df)
-        use_product_cache = st.session_state.get("use_product_cache", True)
-        result_df = _merge_product_master(result_df, use_cache=use_product_cache)
-        st.session_state["edit_result_df"] = result_df
-    except Exception as e:
-        logger.error("Edit 탭 검색 중 오류 발생: %s", e)
-        st.session_state["edit_result_df"] = None
-        st.error(f"검색 중 오류가 발생했습니다: {e}")
+    with st.spinner("데이터 조회 중..."):
+        try:
+            engine = snowflake_SQL.connect_snowflake()
+            with engine.connect() as conn:
+                result_df = snowflake_SQL.query_to_snowflake_with_text(query=query, conn=conn)
+            result_df.columns = [col.upper() for col in result_df.columns]
+            result_df = _result_df_edit(result_df)
+            use_product_cache = st.session_state.get("use_product_cache", True)
+            with st.spinner("품목 마스터 병합 중..."):
+                result_df = _merge_product_master(result_df, use_cache=use_product_cache)
+            st.session_state["edit_result_df"] = result_df
+        except Exception as e:
+            logger.error("Edit 탭 검색 중 오류 발생: %s", e)
+            st.session_state["edit_result_df"] = None
+            st.error(f"검색 중 오류가 발생했습니다: {e}")
 
 def _merge_product_master(df: pd.DataFrame, use_cache: bool = True) -> pd.DataFrame:
     """기존 DESC 콜럼을 제거하고 PRODUCT_MASTER 데이터를 merge한다.
@@ -618,7 +620,8 @@ def show_dashboard(df: pd.DataFrame) -> None:
                     st.plotly_chart(fig2, use_container_width=True)
 
     # ── 피벗 테이블 생성 ──────────────────────────────────────────
-    pivot_df = _build_pivot_df(df, selected_levels)
+    with st.spinner("피벗 테이블 생성 중..."):
+        pivot_df = _build_pivot_df(df, selected_levels)
 
     st.caption("피벗 데이터")
 
