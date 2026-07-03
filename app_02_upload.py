@@ -86,6 +86,14 @@ def read_origin_xl(uploaded_file: object) -> Optional[pd.DataFrame]:
 
     df = origin_df.copy()
 
+    # 엑셀에 표기된fcst 날짜(a1셀)가 이번달과 다르면 에러 메시지 출력 처음 읽으면 첫번째 컬럼으로 인식됨
+    fcst_date = pd.to_datetime(df.columns[0]).strftime("%Y-%m")
+    
+    if fcst_date != pd.Timestamp.now().strftime("%Y-%m"):
+        st.session_state["err_msg"] = f"엑셀에 표기된 **A1셀** 날짜가 이번달({pd.Timestamp.now().strftime('%Y-%m')})이 아닙니다.\n\n날짜 업데이트 후 업로드 부탁드립니다."
+        st.session_state["is_valid"] = False
+        return None
+
     # 1. SKU 행 시작점 찾기
     sku_row_found = False
     for i, row in df.iterrows():
