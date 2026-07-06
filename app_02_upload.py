@@ -279,6 +279,10 @@ def read_upload_xl(uploaded_file: object) -> Optional[pd.DataFrame]:
     if "STATUS" in df.columns:
         df["STATUS"] = df["STATUS"].fillna("").astype(str)
 
+    # 템플릿에서 ABC class 컬럼이 제거될 수 있으므로 누락 시 None으로 추가
+    if "ABC_CLASS" not in df.columns:
+        df["ABC_CLASS"] = None
+
     # 포캐스트 월 컬럼 추출
     month_col = []
     for col in df.columns:
@@ -394,6 +398,29 @@ def is_sign_off(conn: object) -> bool:
     return False
 
 
+def _fetch_distinct_values(conn: object, column: str, table: str) -> list[str]:
+    """Snowflake에서 지정 컬럼의 고유 값 목록을 조회한다.
+
+    Args:
+        conn (object): 활성화된 SQLAlchemy Connection 객체.
+        column (str): 조회할 컬럼명.
+        table (str): 조회할 테이블명 (스키마 포함).
+
+    Returns:
+        list[str]: 고유 값 문자열 목록. 조회 실패 시 빈 리스트 반환.
+    """
+    try:
+        query = f'SELECT DISTINCT "{column}" FROM {table}'
+        df = snowflake_SQL.query_to_snowflake_with_text(query, conn=conn)
+        # Snowflake/SQLAlchemy 반환 컬럼명이 대문자/소문자로 달라질 수 있으므로
+        # 첫 번째 컬럼을 직접 사용한다.
+        values = df.iloc[:, 0].dropna().astype(str).unique().tolist()
+        return sorted([v for v in values if v.strip()])
+    except Exception as e:
+        logger.error("%s DISTINCT 조회 실패: %s", column, e)
+        return []
+
+
 def make_tamplate_xlsx() -> bytes:
     """openpyxl로 업로드 양식 템플릿을 생성하고 바이너리 데이터로 반환한다.
 
@@ -410,8 +437,19 @@ def make_tamplate_xlsx() -> bytes:
     # 달 추가
     month_list = [(today + relativedelta(months=i)).strftime("%Y%m") for i in range(13)]
 
-    manual = ["필수", "1: 신제품, 2: 런닝품, 3: 단종 임박", "", "필수", "필수"] + ["FCST" for _ in month_list]
-    header = ["SKU", "Status", "ABC class", "사업부", "채널"] + month_list
+    # DEPT, CHANNEL 드롭다운 값 조회
+    dept_options = []
+    channel_options = []
+    try:
+        engine = snowflake_SQL.connect_snowflake()
+        with engine.connect() as conn:
+            dept_options = _fetch_distinct_values(conn, "DEPT", "TESTDB.PUBLIC.MONTH_FORECAST_CONSOL")
+            channel_options = _fetch_distinct_values(conn, "CHANNEL", "TESTDB.PUBLIC.MONTH_FORECAST_CONSOL")
+    except Exception as e:
+        logger.error("드롭다운 값 조회 중 오류: %s", e)
+
+    manual = ["필수", "1: 신제품, 2: 런닝품, 3: 단종 임박", "필수", "필수"] + ["FCST" for _ in month_list]
+    header = ["SKU", "Status", "사업부", "채널"] + month_list
     ws.append(manual)
     ws.append(header)
 
@@ -427,19 +465,45 @@ def make_tamplate_xlsx() -> bytes:
         ws.cell(row=2, column=i+1).font = header_font
         ws.cell(row=2, column=i+1).fill = header_fill
 
-    drop_down_options = '"1,2,3,4,5"'
-    dv = DataValidation(type="list", formula1=drop_down_options, allow_blank=True)
+    # Status 드롭다운 (강제)
+    status_dv = DataValidation(type="list", formula1='"1,2,3,4,5"', allow_blank=True)
+    status_dv.showErrorMessage = True
+    status_dv.errorStyle = "stop"
+    status_dv.errorTitle = "입력 오류 (지정된 목록 없음)"
+    status_dv.error = "드롭다운 목록에 있는 값만 입력할 수 있습니다."
+    status_dv.add("B3:B1000")
+    ws.add_data_validation(status_dv)
 
-    # 드롭다운 에러 메세지 설정
-    dv.showErrorMessage = True
-    dv.errorStyle = "stop"
-    dv.errorTitle = "입력 오류 (지정된 목록 없음)"
-    dv.error = "드롭다운 목록에 있는 값만 입력할 수 있습니다."
+    # 사업부, 채널 드롭다운을 위한 숨겨진 시트
+    if dept_options or channel_options:
+        hidden_ws = wb.create_sheet("dropdown_values")
+        hidden_ws.sheet_state = "hidden"
+        for i, val in enumerate(dept_options, 1):
+            hidden_ws.cell(row=i, column=1, value=val)
+        for i, val in enumerate(channel_options, 1):
+            hidden_ws.cell(row=i, column=2, value=val)
 
-    dv.add("B3:B1000")
+    # 사업부 드롭다운 (강제하지 않음)
+    if dept_options:
+        dept_dv = DataValidation(
+            type="list",
+            formula1=f"='dropdown_values'!$A$1:$A${len(dept_options)}",
+            allow_blank=True
+        )
+        dept_dv.showErrorMessage = False
+        dept_dv.add("C3:C1000")
+        ws.add_data_validation(dept_dv)
 
-    # 시트에 드롭다운 객체 추가
-    ws.add_data_validation(dv)
+    # 채널 드롭다운 (강제하지 않음)
+    if channel_options:
+        channel_dv = DataValidation(
+            type="list",
+            formula1=f"='dropdown_values'!$B$1:$B${len(channel_options)}",
+            allow_blank=True
+        )
+        channel_dv.showErrorMessage = False
+        channel_dv.add("D3:D1000")
+        ws.add_data_validation(channel_dv)
 
     # 생성한 워크북을 메모리 버퍼에 저장
     wb.save(excel_buffer)
