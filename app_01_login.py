@@ -1,5 +1,6 @@
 import streamlit as st
 from streamlit_oauth import OAuth2Component
+from sqlalchemy import text
 import requests
 import logging
 import snowflake_SQL
@@ -68,9 +69,13 @@ def regist_user(email: str, name: str) -> None:
     """
     engine = snowflake_SQL.connect_snowflake()
     created_at = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
-    with engine.connect() as conn:
-        query = f"INSERT INTO ALLOWED_USERS (EMAIL, USER_NAME, ROLE, CREATED_AT) VALUES ('{email}', '{name}', 'USER', '{created_at}');"
-        snowflake_SQL.query_to_snowflake_with_text(query=query, conn=conn)
+    query = (
+        "INSERT INTO ALLOWED_USERS (EMAIL, USER_NAME, ROLE, CREATED_AT) "
+        "VALUES (:email, :name, 'USER', :created_at)"
+    )
+    # engine.begin(): 블록 정상 종료 시 자동 commit (기존 engine.connect()는 commit 없이 닫혀 INSERT가 롤백되던 문제 수정)
+    with engine.begin() as conn:
+        conn.execute(text(query), {"email": email, "name": name, "created_at": created_at})
 
 def show_login() -> None:
     """Slack OAuth2 및 이메일/비밀번호 이중 로그인 화면을 렌더링한다.
@@ -201,11 +206,18 @@ def show_login() -> None:
                     st.session_state["user_data"] = app_cache_load.load_users_data()
                     user_data = st.session_state["user_data"]
 
+            # 등록/조회 후에도 유저가 없으면 크래시 대신 에러 안내 (IndexError 방지)
+            user_role_series = user_data.loc[user_data["EMAIL"] == email, "ROLE"]
+            if user_role_series.empty:
+                logger.error("유저 등록 후에도 ALLOWED_USERS에서 %s 를 찾지 못했습니다.", email)
+                st.error("유저 정보 조회에 실패했습니다. 잠시 후 다시 시도하거나 관리자에게 문의해주세요.")
+                st.stop()
+
             # 스트림릿 자체 세션에 로그인 상태 기록
             st.session_state['authentication_status'] = True
             st.session_state['user_email'] = email
             st.session_state['user_name_kr'] = name
-            st.session_state['user_role'] = user_data.loc[user_data["EMAIL"] == email, "ROLE"].iloc[0]
+            st.session_state['user_role'] = user_role_series.iloc[0]
 
             st.success(f"{name}님, 환영합니다!")
             st.rerun()
