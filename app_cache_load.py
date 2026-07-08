@@ -74,6 +74,15 @@ def load_product_master(use_cache: bool = True) -> pd.DataFrame:
     return _fetch_product_master()
 
 
+def clear_users_cache() -> None:
+    """ALLOWED_USERS 캐시(_load_users_data_cached)를 초기화한다.
+
+    신규 유저 등록 직후 최신 유저 목록을 다시 조회해야 할 때 호출한다.
+    """
+    # st.cache_data가 적용된 내부 함수의 캐시를 비움
+    _load_users_data_cached.clear()
+
+
 def load_users_data(use_cache: bool = True) -> pd.DataFrame:
     """ALLOWED_USERS 테이블을 로드하여 로그인 검증에 사용한다.
 

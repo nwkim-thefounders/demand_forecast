@@ -197,7 +197,7 @@ def show_login() -> None:
 
                 with st.spinner("신규 유저 등록 중..."):
                     regist_user(email=email, name=name)
-                    app_cache_load.load_users_data.clear()
+                    app_cache_load.clear_users_cache()
                     st.session_state["user_data"] = app_cache_load.load_users_data()
                     user_data = st.session_state["user_data"]
 
