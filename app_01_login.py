@@ -1,6 +1,5 @@
 import streamlit as st
 from streamlit_oauth import OAuth2Component
-from sqlalchemy import text
 import requests
 import logging
 import snowflake_SQL
@@ -70,12 +69,12 @@ def regist_user(email: str, name: str) -> None:
     engine = snowflake_SQL.connect_snowflake()
     created_at = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
     query = (
-        "INSERT INTO ALLOWED_USERS (EMAIL, USER_NAME, ROLE, CREATED_AT) "
-        "VALUES (:email, :name, 'USER', :created_at)"
+        f"INSERT INTO ALLOWED_USERS (EMAIL, USER_NAME, ROLE, CREATED_AT) "
+        f"VALUES ('{email}', '{name}', 'USER', '{created_at}')"
     )
-    # engine.begin(): 블록 정상 종료 시 자동 commit (기존 engine.connect()는 commit 없이 닫혀 INSERT가 롤백되던 문제 수정)
-    with engine.begin() as conn:
-        conn.execute(text(query), {"email": email, "name": name, "created_at": created_at})
+    with engine.connect() as conn:
+        snowflake_SQL.query_to_snowflake_with_text(query, conn)
+        conn.commit()
 
 def show_login() -> None:
     """Slack OAuth2 및 이메일/비밀번호 이중 로그인 화면을 렌더링한다.
