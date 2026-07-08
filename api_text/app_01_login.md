@@ -11,7 +11,10 @@ Slack OAuth2 및 이메일/비밀번호 이중 로그인 화면을 렌더링하�
 5. 세션(`authentication_status`, `user_email`, `user_name_kr`, `user_role`)에 로그인 상태 기록.
 
 ## 함수 위치
-- `regist_user` (line 63): 신규 Slack 사용자를 ALLOWED_USERS 테이블에 INSERT (`engine.begin()` + 바인드 파라미터로 자동 commit)
+- `regist_user` (line 63): 신규 Slack 사용자를 ALLOWED_USERS 테이블에 INSERT
+  - SQLAlchemy `text()` + `:email`/`:name`/`:created_at` 파라미터 바인딩 사용 (SQL 인젝션 방지)
+  - 이미 존재하는 이메일이면 DUPLICATE/UNIQUE 예외를 catch하여 무시하고 정상 종료
+  - 명시적 `conn.commit()` / `conn.rollback()` 처리
 - `show_login` (line 80): 로그인 화면 렌더링 및 인증 처리 메인 함수
 
 ## 주의사항
@@ -19,6 +22,4 @@ Slack OAuth2 및 이메일/비밀번호 이중 로그인 화면을 렌더링하�
   `AttributeError: 'function' object has no attribute 'clear'`가 발생함.
   반드시 `app_cache_load.clear_users_cache()`를 사용할 것.
 - SQLAlchemy 2.0에서 `engine.connect()`로 연 커넥션은 `commit()` 없이 닫히면 자동 rollback됨.
-  INSERT/UPDATE 등 DML은 반드시 `engine.begin()` 또는 명시적 `conn.commit()`을 사용할 것.
-  (과거 `regist_user`가 commit 없이 INSERT하여 신규 유저가 저장되지 않고
-  line 208 `IndexError: single positional indexer is out-of-bounds`가 발생했던 원인)
+  INSERT/UPDATE 등 DML은 반드시 명시적 `conn.commit()`을 사용할 것.

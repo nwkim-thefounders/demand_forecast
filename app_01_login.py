@@ -1,5 +1,6 @@
 import streamlit as st
 from streamlit_oauth import OAuth2Component
+from sqlalchemy import text
 import requests
 import logging
 import snowflake_SQL
@@ -62,19 +63,38 @@ def login_btn() -> None:
 def regist_user(email: str, name: str) -> None:
     """신규 Slack 사용자를 ALLOWED_USERS 테이블에 등록한다.
 
+    이미 동일한 이메일이 존재하면 경고 로그만 남기고 예외를 발생시키지 않는다.
+    SQL 인젝션 방지를 위해 파라미터 바인딩을 사용한다.
+
     Args:
         email (str): 등록할 사용자 이메일 주소.
         name (str): 등록할 사용자 실명.
+
+    Raises:
+        Exception: DUPLICATE 이외의 INSERT 실패 시.
     """
     engine = snowflake_SQL.connect_snowflake()
     created_at = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
     query = (
-        f"INSERT INTO ALLOWED_USERS (EMAIL, USER_NAME, ROLE, CREATED_AT) "
-        f"VALUES ('{email}', '{name}', 'USER', '{created_at}')"
+        "INSERT INTO ALLOWED_USERS (EMAIL, USER_NAME, ROLE, CREATED_AT) "
+        "VALUES (:email, :name, 'USER', :created_at)"
     )
     with engine.connect() as conn:
-        snowflake_SQL.query_to_snowflake_with_text(query, conn)
-        conn.commit()
+        try:
+            conn.execute(
+                text(query),
+                {"email": email, "name": name, "created_at": created_at},
+            )
+            conn.commit()
+            logger.info("신규 유저 등록 완료: %s", email)
+        except Exception as e:
+            conn.rollback()
+            error_msg = str(e).upper()
+            if any(keyword in error_msg for keyword in ("DUPLICATE", "UNIQUE", "ALREADY EXISTS")):
+                logger.warning("이미 등록된 유저입니다. 무시하고 진행: %s", email)
+            else:
+                logger.error("유저 등록 실패: %s", e)
+                raise
 
 def show_login() -> None:
     """Slack OAuth2 및 이메일/비밀번호 이중 로그인 화면을 렌더링한다.
