@@ -233,6 +233,13 @@ def read_origin_xl(uploaded_file: object) -> Optional[pd.DataFrame]:
         return None
     df = df.replace(0, None)
     df = df.dropna(subset="FORECAST_QTY")
+
+    # write_pandas / pd_writer -> to_parquet 대응: 숫자 컬럼 dtype 재보장
+    df["MONTH"] = pd.to_numeric(df["MONTH"], errors="coerce")
+    df["FCST_MTH"] = pd.to_numeric(df["FCST_MTH"], errors="coerce")
+    df["FORECAST_QTY"] = pd.to_numeric(df["FORECAST_QTY"], errors="coerce")
+    df["ABC_CLASS"] = pd.to_numeric(df["ABC_CLASS"], errors="coerce")
+
     st.session_state["df"] = df
     return df
 
@@ -344,6 +351,12 @@ def read_upload_xl(uploaded_file: object) -> Optional[pd.DataFrame]:
     }
     df = df[[key for key in col_map.keys()]]
     df = df.rename(columns=col_map)
+
+    # write_pandas / pd_writer -> to_parquet 대응: 숫자 컬럼 dtype 변환
+    df["MONTH"] = pd.to_numeric(df["MONTH"], errors="coerce")
+    df["FCST_MTH"] = pd.to_numeric(df["FCST_MTH"], errors="coerce")
+    df["FORECAST_QTY"] = pd.to_numeric(df["FORECAST_QTY"], errors="coerce")
+    df["ABC_CLASS"] = pd.to_numeric(df["ABC_CLASS"], errors="coerce")
 
     st.session_state["df"] = df
     st.session_state["is_valid"] = True
@@ -529,6 +542,12 @@ def save_btn() -> None:
 
                 if is_sign_off(conn=conn):
                     df["SIGN_STATUS"] = "SIGNOFF"
+
+                # write_pandas parquet 변환 대응 최종 dtype 정리
+                df["MONTH"] = pd.to_numeric(df["MONTH"], errors="coerce")
+                df["FCST_MTH"] = pd.to_numeric(df["FCST_MTH"], errors="coerce")
+                df["FORECAST_QTY"] = pd.to_numeric(df["FORECAST_QTY"], errors="coerce")
+                df["ABC_CLASS"] = pd.to_numeric(df["ABC_CLASS"], errors="coerce")
 
                 snowflake_SQL.input_data(conn, df, "MONTH_FORECAST_CONSOL")
 
