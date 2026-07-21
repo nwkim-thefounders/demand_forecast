@@ -7,11 +7,13 @@ def show_sidebar():
 
         selected = sac.menu(
             [
-                sac.MenuItem("Home", icon="house"),
-                sac.MenuItem("Demand forecast", icon="chart-line", children=[
-                    sac.MenuItem("upload", icon="upload"),
-                    sac.MenuItem("view", icon="eye"),
-                ]),
+                # sac.MenuItem("Home", icon="house"),
+                sac.MenuItem("upload", icon="upload"),
+                sac.MenuItem("view", icon="eye"),
+                # sac.MenuItem("Demand forecast", icon="chart-line", children=[
+                #     sac.MenuItem("upload", icon="upload"),
+                #     sac.MenuItem("view", icon="eye"),
+                # ]),
             ],
             key="main_menu",
             format_func="title",
