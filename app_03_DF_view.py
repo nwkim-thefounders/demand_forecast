@@ -253,7 +253,8 @@ def _render_sidebar() -> None:
         channel_list = st.session_state.get("channel_list", [])
         registant_list = st.session_state.get("registant_list", [])
 
-        st.caption("MONTH_FORECAST_CONSOL 테이블 검색")
+        st.divider()
+        st.subheader("MONTH_FORECAST_CONSOL 테이블 검색")
 
         if len(fcst_month_list) >= 2:
             st.select_slider(
@@ -699,7 +700,7 @@ def show_dashboard(df: pd.DataFrame) -> None:
         st.dataframe(df[display_cols].reset_index(drop=True), width="stretch")
 
 
-def show_edit_page() -> None:
+def show_view_page() -> None:
     """View 탭 페이지를 렌더링한다.
 
     사이드바 검색 필터와 검색 결과 대시보드로 구성된다.

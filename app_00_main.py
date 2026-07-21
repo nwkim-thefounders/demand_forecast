@@ -1,7 +1,8 @@
 import streamlit as st
 import app_01_login
-import app_03_upload
-import app_99_regist_edit
+import app_02_sidebar
+import app_03_DF_upload
+import app_03_DF_view
 import streamlit_antd_components as sac
 
 
@@ -19,27 +20,17 @@ def show_main() -> None:
     if not st.session_state.get("authentication_status"):
         app_01_login.show_login()
         return
-
-
-    nav_items = [
-        sac.TabsItem(label="Up Load", icon="cloud-upload"),
-        sac.TabsItem(label="View", icon="eye"),
-    ]
-
-    selected_tab = sac.tabs(
-        items=nav_items,
-        format_func="title",
-        align="start",
-        position="top",
-        size="md",
-        variant="outline",
-        use_container_width=False,
-    )
-
-    if selected_tab == "View":
-        app_99_regist_edit.show_edit_page()
+    
+    app_02_sidebar.show_sidebar()
+    selected_menu = st.session_state["main_menu"]
+    
+    if selected_menu == "upload":
+        app_03_DF_upload.show_upload_page()
+    elif selected_menu == "view":
+        app_03_DF_view.show_view_page()
     else:
-        app_03_upload.show_upload_page()
+        st.title(f"{selected_menu}")
+        st.subheader(f"{selected_menu} 페이지는 현재 준비 중입니다.")
 
 
 show_main()
