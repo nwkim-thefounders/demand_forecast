@@ -242,8 +242,6 @@ def _calc_kpi_delta(df: pd.DataFrame, fcst_mth_list: list) -> tuple:
     qty_delta_label = f"{qty_delta:+,}{pct} (vs {prev_mth}→{latest_mth})"
     return qty_delta, qty_delta_label, latest_mth, prev_mth
 
-
-
 def _render_sidebar() -> None:
     """Edit 탭 사이드바 필터 UI를 렌더링한다."""
     with st.sidebar:
@@ -328,6 +326,47 @@ def _render_sidebar() -> None:
         st.write("")
         st.button(label="검색", type="primary", on_click=search_data, width="stretch")
 
+def _render_search_form() -> None:
+    """MONTH_FORECAST_CONSOL 테이블 검색 폼을 렌더링한다."""
+    fcst_month_list = st.session_state.get("fcst_month_list", [])
+    target_month_list = st.session_state.get("target_month_list", [])
+    dept_list = st.session_state.get("dept_list", [])
+    channel_list = st.session_state.get("channel_list", [])
+    registant_list = st.session_state.get("registant_list", [])
+
+    with st.expander("데이터 검색", expanded=True):
+        with st.container(border=False, horizontal=True, horizontal_alignment="center"):
+            with st.container(border=False, horizontal=False):
+                with st.container(border=True, horizontal=False):
+                    if len(fcst_month_list) >= 2:
+                        st.select_slider(label="등록 월 - FCST_MTH", options=fcst_month_list, value=(fcst_month_list[-2], fcst_month_list[-1]), key="selectedfcst_month")
+                    elif len(fcst_month_list) == 1:
+                        st.select_slider(label="등록 월 - FCST_MTH", options=fcst_month_list, value=(fcst_month_list[0], fcst_month_list[0]), key="selectedfcst_month")
+                    else:
+                        st.session_state["selectedfcst_month"] = (None, None)
+                        st.info("등록 월 데이터 없음")
+
+                with st.container(border=True, horizontal=False):
+                    if len(target_month_list) >= 2:
+                        st.select_slider(label="예측 월 - MONTH", options=target_month_list, value=(target_month_list[0], target_month_list[-1]), key="selected_target_month")
+                    elif len(target_month_list) == 1:
+                        st.select_slider(label="예측 월 - MONTH", options=target_month_list, value=(target_month_list[0], target_month_list[0]), key="selected_target_month")
+                    else:
+                        st.session_state["selected_target_month"] = (None, None)
+                        st.info("예측 월 데이터 없음")
+
+            with st.container(border=False, horizontal=False):
+                st.multiselect(label="사업부 - DEPT", options=dept_list, key="selected_dept")
+                st.multiselect(label="채널 - CHANNEL", options=channel_list, key="selected_channel")
+                st.multiselect(label="등록자 - REGISTANT", options=registant_list, key="selected_registant")
+            fcst_range = st.session_state.get("selectedfcst_month", (None, None))
+            target_range = st.session_state.get("selected_target_month", (None, None))
+            dept_str = ", ".join(st.session_state.get("selected_dept", []))
+            channel_str = ", ".join(st.session_state.get("selected_channel", []))
+            registant_str = ", ".join(st.session_state.get("selected_registant", []))
+
+        with st.container(border=False, horizontal=True, horizontal_alignment="center"):
+            st.button(label="검색", type="primary", on_click=search_data)
 
 def show_dashboard(df: pd.DataFrame) -> None:
     """검색 결과 DataFrame을 다중 선택 계층 기반 피벗 테이블로 표시한다.
@@ -647,7 +686,8 @@ def show_view_page() -> None:
     if "option_df" not in st.session_state:
         init_data()
 
-    _render_sidebar()
+    # _render_sidebar()
+    _render_search_form()
 
     result_df = st.session_state.get("edit_result_df")
     if result_df is None:
