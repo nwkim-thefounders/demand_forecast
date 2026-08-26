@@ -405,6 +405,7 @@ def show_dashboard(df: pd.DataFrame) -> None:
             with tab_graph:
                 # 계층 선택
                 CHART_LEVEL_OPTIONS = {
+                    "월별 (전체 합계)":              [],
                     "사업부 (DEPT)":                ["DEPT"],
                     "사업부 + 채널 (DEPT+CHANNEL)": ["DEPT", "CHANNEL"],
                     "사업부 + 채널 + SKU":           ["DEPT", "CHANNEL", "SKU"],
@@ -450,8 +451,10 @@ def show_dashboard(df: pd.DataFrame) -> None:
                     set(agg_prev["MONTH"].astype(str).tolist())
                 )
 
-                # 계층 고유값 (DEPT or DEPT+CHANNEL)
+                # 계층 고유값 (DEPT or DEPT+CHANNEL). group_cols가 없으면(월별 전체 합계) "전체" 단일 그룹.
                 def _grp_key(frame: pd.DataFrame) -> pd.Series:
+                    if not group_cols:
+                        return pd.Series(["전체"] * len(frame), index=frame.index)
                     return frame[group_cols].astype(str).apply("|".join, axis=1)
 
                 all_groups = sorted(set().union(*[
@@ -460,15 +463,31 @@ def show_dashboard(df: pd.DataFrame) -> None:
 
                 chart_tab1, chart_tab2 = st.tabs(["등록 월별 그래프", "변화량 (Delta Graph)"])
 
-                # 색상 팔레트 (계층별) 및 등록월 순서별 선 스타일
+                # 색상 팔레트 (계층별)
                 palette = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#17becf", "#8c564b", "#e377c2"]
-                dash_styles = ["dot", "dash", "dashdot", "longdash", "longdashdot"]
                 n_mth = len(fcst_mth_list)
+
+                def _line_style_by_recency(mi: int) -> dict:
+                    """등록월 순서(mi)에 따라 최신월일수록 굵어지는 line 스타일을 반환한다.
+
+                    Args:
+                        mi (int): fcst_mth_list 내 등록월 인덱스 (0=가장 과거).
+
+                    Returns:
+                        dict: go.Scatter의 line 파라미터에 사용할 width 값.
+                    """
+                    is_latest = (mi == n_mth - 1)
+                    if is_latest:
+                        return dict(width=4.5, dash="solid")
+                    # ratio: 0(가장 과거) ~ 1(최신 직전월)
+                    ratio = mi / (n_mth - 2) if n_mth > 2 else 0.0
+                    width = 0.6 + ratio * 3.4  # 과거일수록 얇음(0.6) → 최신에 가까울수록 굵음(4.0)
+                    return dict(width=width, dash="solid")
 
                 with chart_tab1:
                     st.caption(textwrap.dedent(f"""\
                         💡 **사용법**
-                        - 검색한 등록 월({fcst_mth_list[0]} ~ {fcst_mth_list[-1]}) 전체가 표시됩니다. 최신월({latest_mth})은 실선, 이전 등록월은 점선으로 구분됩니다.
+                        - 검색한 등록 월({fcst_mth_list[0]} ~ {fcst_mth_list[-1]}) 전체가 표시됩니다. 과거 등록월일수록 선이 얇고, 최신월({latest_mth})에 가까워질수록 선이 굵어집니다.
                         - 우측 범례에서 특정 항목을 클릭하면 해당 선만 표기/미표기 변경 가능합니다.
                         - 더블클릭 시 해당 선만 단독 표시됩니다.
                         """))
@@ -486,11 +505,7 @@ def show_dashboard(df: pd.DataFrame) -> None:
                                 x=sub["MONTH"].astype(str),
                                 y=sub["FORECAST_QTY"],
                                 mode="lines+markers",
-                                line=dict(
-                                    color=color,
-                                    width=3 if is_latest else 1.5,
-                                    dash="solid" if is_latest else dash_styles[mi % len(dash_styles)],
-                                ),
+                                line=dict(color=color, **_line_style_by_recency(mi)),
                                 marker=dict(size=7 if is_latest else 5),
                             ))
                     fig1.update_layout(
