@@ -568,61 +568,59 @@ def show_upload_page() -> None:
         st.session_state["df"] = None
         st.session_state["uploader_version"] = 0
 
-    main_col1, main_col2, main_col3 = st.columns([0.5, 9, 0.5])
-    with main_col2:
-        st.title("Demand Forecasting File Upload")
-        st.write(f"{st.session_state.get('user_name_kr', '')}님, 환영합니다!")
-        st.write("아래 엑셀파일을 업로드 하거나 drag & drop으로 업로드 해주세요.")
+    st.title("Demand Forecasting File Upload")
+    st.write(f"{st.session_state.get('user_name_kr', '')}님, 환영합니다!")
+    st.write("아래 엑셀파일을 업로드 하거나 drag & drop으로 업로드 해주세요.")
 
-        with st.container(border=False, horizontal=True, horizontal_alignment="right"):
-            xlsx_data = make_tamplate_xlsx()
-            st.download_button(
-                label="양식 다운로드",
-                data=xlsx_data,
-                file_name="regist_template.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                type="secondary",
-                key="bulk_template_download"
-            )
-
-        uploaded_file = st.file_uploader(
-            label="엑셀 파일 업로드",
-            type=["xlsx", "xls"],
-            accept_multiple_files=False,
-            key=f"upload_excel_{st.session_state.get('uploader_version', 0)}",
+    with st.container(border=False, horizontal=True, horizontal_alignment="right"):
+        xlsx_data = make_tamplate_xlsx()
+        st.download_button(
+            label="양식 다운로드",
+            data=xlsx_data,
+            file_name="regist_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            type="secondary",
+            key="bulk_template_download"
         )
 
-        if uploaded_file is not None:
-            try:
-                df = read_df_xlsx(uploaded_file)
+    uploaded_file = st.file_uploader(
+        label="엑셀 파일 업로드",
+        type=["xlsx", "xls"],
+        accept_multiple_files=False,
+        key=f"upload_excel_{st.session_state.get('uploader_version', 0)}",
+    )
 
-                # 에러 메시지가 세션에 담겨 있다면 에러박스 출력
-                if st.session_state.get("err_msg"):
-                    st.error(st.session_state["err_msg"])
-                elif df is not None:
-                    if st.session_state["df"] is not None:
-                        st.caption("시트 읽어오기", help=read_help_text)
-                    st.caption("검사 로직", help=check_help_text)
-                    st.write("")
-                    with st.container(border=False, horizontal=True):
-                        with st.container(border=False, horizontal=True, horizontal_alignment="left"):
-                            st.subheader("데이터 미리보기")
-                        with st.container(border=False, horizontal=True, horizontal_alignment="right"):
-                            if st.session_state["is_valid"]:
-                                if st.session_state.get("user_role", "") == "ADMIN":
-                                    st.toggle(
-                                        label="Sign off",
-                                        key="sign_off",
-                                        help="활성화 상태로 데이터 저장시 기존 SIGN_OFF 상태의 데이터를 삭제 후 재업로드 합니다."
-                                    )
-                                st.button(label="데이터 저장", type="primary", on_click=save_btn)
+    if uploaded_file is not None:
+        try:
+            df = read_df_xlsx(uploaded_file)
 
-                    st.dataframe(df, use_container_width=True)
-                    st.write(len(df))
+            # 에러 메시지가 세션에 담겨 있다면 에러박스 출력
+            if st.session_state.get("err_msg"):
+                st.error(st.session_state["err_msg"])
+            elif df is not None:
+                if st.session_state["df"] is not None:
+                    st.caption("시트 읽어오기", help=read_help_text)
+                st.caption("검사 로직", help=check_help_text)
+                st.write("")
+                with st.container(border=False, horizontal=True):
+                    with st.container(border=False, horizontal=True, horizontal_alignment="left"):
+                        st.subheader("데이터 미리보기")
+                    with st.container(border=False, horizontal=True, horizontal_alignment="right"):
+                        if st.session_state["is_valid"]:
+                            if st.session_state.get("user_role", "") == "ADMIN":
+                                st.toggle(
+                                    label="Sign off",
+                                    key="sign_off",
+                                    help="활성화 상태로 데이터 저장시 기존 SIGN_OFF 상태의 데이터를 삭제 후 재업로드 합니다."
+                                )
+                            st.button(label="데이터 저장", type="primary", on_click=save_btn)
 
-            except Exception as e:
-                # 예상치 못한 시스템 치명적 에러 핸들링
-                logger.error("업로드 페이지 예외 발생: %s", e)
-                st.error(f"시스템 예외가 발생했습니다 (개발자 문의 필요): {e}")
-        else:
-            st.info("업로드된 파일이 없습니다. 업로드할 파일을 선택해주세요.")
+                st.dataframe(df, width="stretch")
+                st.write(len(df))
+
+        except Exception as e:
+            # 예상치 못한 시스템 치명적 에러 핸들링
+            logger.error("업로드 페이지 예외 발생: %s", e)
+            st.error(f"시스템 예외가 발생했습니다 (개발자 문의 필요): {e}")
+    else:
+        st.info("업로드된 파일이 없습니다. 업로드할 파일을 선택해주세요.")
