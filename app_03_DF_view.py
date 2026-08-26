@@ -591,6 +591,13 @@ def show_dashboard(df: pd.DataFrame) -> None:
                         styles.append("")
                 return styles
 
+            # Pandas Styler는 렌더링 가능한 셀 개수에 기본 상한(262,144)이 있어
+            # 조회 기간이 넓어 피벗 테이블이 커지면 StreamlitAPIException이 발생한다.
+            # 실제 필요한 셀 개수만큼 상한을 동적으로 올려 예외를 방지한다.
+            required_elements = pivot_df.shape[0] * pivot_df.shape[1]
+            if required_elements > pd.get_option("styler.render.max_elements"):
+                pd.set_option("styler.render.max_elements", required_elements)
+
             st.dataframe(
                 pivot_df.style
                 .format(fmt)
