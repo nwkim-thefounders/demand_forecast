@@ -1,6 +1,8 @@
 # updated 2026-06-23
 streamlit
 pandas
+# snowflake-sqlalchemy 1.8.2는 SQLAlchemy 2.1 계열과 호환되지 않는다.
+SQLAlchemy==2.0.54
 snowflake-sqlalchemy==1.8.2
 snowflake-connector-python==4.1.1
 cryptography
