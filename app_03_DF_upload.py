@@ -41,6 +41,21 @@ col_mapping = {
 }
 
 
+def _format_signoff_timestamp(
+    timestamp: datetime.datetime | None = None,
+) -> str:
+    """SIGNOFF_DT 저장용 시각을 초 단위 문자열로 변환한다.
+
+    Args:
+        timestamp (datetime.datetime | None): 변환할 시각. None이면 현재 시각을 사용한다.
+
+    Returns:
+        str: `YYYY-MM-DD HH:MM:SS` 형식의 시각 문자열.
+    """
+    target_timestamp = timestamp or datetime.datetime.now()
+    return target_timestamp.strftime("%Y-%m-%d %H:%M:%S")
+
+
 def melt_logic(df: pd.DataFrame) -> pd.DataFrame:
     """QTY 원본 DataFrame을 wide → long 형태로 피벗(Melt)하고 DB 저장 양식으로 변환한다.
 
@@ -58,7 +73,7 @@ def melt_logic(df: pd.DataFrame) -> pd.DataFrame:
         var_name='MONTH',
         value_name="FORECAST_QTY"
     )
-    df["SIGNOFF_DT"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+    df["SIGNOFF_DT"] = _format_signoff_timestamp()
     df["FCST_MTH"] = pd.Timestamp.now().strftime("%Y%m")
     df = df.set_index(["SIGNOFF_DT", "FCST_MTH"]).reset_index()
 
@@ -331,7 +346,7 @@ def read_upload_xl(uploaded_file: object) -> Optional[pd.DataFrame]:
         right_on="품목코드"
     )
     # 기본값 입력
-    df["SIGNOFF_DT"] = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    df["SIGNOFF_DT"] = _format_signoff_timestamp()
     df["FCST_MTH"] = datetime.datetime.now().strftime("%Y%m")
     df["REGISTANT"] = st.session_state.get("user_name_kr", "")
 
