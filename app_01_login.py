@@ -8,6 +8,7 @@ import app_cache_load
 import re
 import pandas as pd
 import urllib.parse  # URL 쿼리 스트링 빌드용 추가
+from sqlalchemy.exc import SQLAlchemyError
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +20,53 @@ AUTHORIZE_URL = "https://slack.com/oauth/v2/authorize"
 TOKEN_URL = "https://slack.com/api/oauth.v2.access"
 
 oauth2 = OAuth2Component(CLIENT_ID, CLIENT_SECRET, AUTHORIZE_URL, TOKEN_URL, TOKEN_URL, "")
+
+USER_DATA_LOAD_ERROR = "사용자 정보를 불러오지 못했습니다. 잠시 후 다시 시도해주세요."
+
+
+def _retry_user_data_load() -> None:
+    """사용자 조회 캐시와 세션 값을 초기화하고 Streamlit 실행을 다시 시작한다."""
+    # 실패한 조회 결과를 재사용하지 않도록 캐시와 세션을 함께 초기화한다.
+    app_cache_load.clear_users_cache()
+    st.session_state.pop("user_data", None)
+    st.rerun()
+
+
+def _ensure_user_data() -> bool:
+    """사용자 정보를 세션에 적재하고 연결 실패 시 재시도 UI를 표시한다.
+
+    Returns:
+        bool: 사용자 정보가 준비되면 True, 조회가 실패하면 False.
+
+    Raises:
+        None: SQLAlchemyError는 내부에서 안전한 안내와 재시도 UI로 처리한다.
+    """
+    if "user_data" in st.session_state:
+        return True
+
+    try:
+        st.session_state["user_data"] = app_cache_load.load_users_data()
+    except SQLAlchemyError as error:
+        # 인증 서버나 연결 문자열 같은 예외 본문은 로그와 화면에 노출하지 않는다.
+        original_error = getattr(error, "orig", None)
+        error_code = getattr(original_error, "errno", None)
+        if error_code is None:
+            error_code = getattr(original_error, "sqlstate", None)
+        if not isinstance(error_code, int) and not (
+            isinstance(error_code, str)
+            and len(error_code) == 5
+            and error_code.isalnum()
+        ):
+            error_code = "unknown"
+        logger.error(
+            "ALLOWED_USERS 조회 실패: exception_type=%s error_code=%s",
+            type(error).__name__,
+            error_code,
+        )
+        st.error(USER_DATA_LOAD_ERROR)
+        st.button("다시 시도", on_click=_retry_user_data_load)
+        return False
+    return True
 
 def check_email() -> None:
     """세션의 이메일 입력값에 대한 형식 유효성 검사를 수행하고 결과를 세션에 저장한다."""
@@ -99,10 +147,11 @@ def regist_user(email: str, name: str) -> None:
 def show_login() -> None:
     """Slack OAuth2 및 이메일/비밀번호 이중 로그인 화면을 렌더링한다.
 
-    Slack redirect code 감지 → 토큰 교환 → 유저 등록/조회 → 세션 저장 순서로 처리한다.
+    사용자 데이터 조회를 먼저 준비하고, 실패하면 인증 UI를 중단한다. 이후 Slack redirect
+    code 처리 또는 로그인/사용자 등록 흐름을 진행한다.
     """
-    if "user_data" not in st.session_state:
-        st.session_state["user_data"] = app_cache_load.load_users_data()
+    if not _ensure_user_data():
+        return
 
     # 🌟 [핵심 변경] 전체 창 리다이렉트 후 되돌아왔을 때 URL 파라미터(code) 수동 감지 및 처리
     if "code" in st.query_params:
