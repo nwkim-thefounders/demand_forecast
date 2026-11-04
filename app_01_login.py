@@ -71,10 +71,15 @@ def _ensure_user_data() -> bool:
 def check_email() -> None:
     """세션의 이메일 입력값에 대한 형식 유효성 검사를 수행하고 결과를 세션에 저장한다."""
     input_em = st.session_state.get("input_em", "")
-    email_pattern = r'^[a-zA-Z0-9+-_.]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+$'
+    # 문자 클래스에서 하이픈을 마지막에 두어 의도치 않은 ASCII 범위가 생기지 않게 한다.
+    email_pattern = (
+        r"[A-Za-z0-9._+-]+@"
+        r"[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?"
+        r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?)+"
+    )
 
     if input_em != "":
-        if not re.match(email_pattern, input_em):
+        if not re.fullmatch(email_pattern, input_em):
             st.session_state["is_valueable"] = False
             st.session_state["login_warning_msg"] = "올바른 이메일 형식이 아닙니다."
         else:
