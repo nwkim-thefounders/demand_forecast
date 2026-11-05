@@ -48,7 +48,8 @@ def _fetch_users_data() -> pd.DataFrame:
         Exception: Snowflake 연결 또는 쿼리 실행 실패 시.
     """
     engine = snowflake_SQL.connect_snowflake()
-    query = "SELECT * FROM TESTDB.PUBLIC.ALLOWED_USERS;"
+    # 사용자 테이블만 별도 설정 키로 위치를 선택한다.
+    query = f"SELECT * FROM {snowflake_SQL.get_allowed_users_fqn()};"
     with engine.connect() as conn:
         df = snowflake_SQL.query_to_snowflake_with_text(query=query, conn=conn)
         df.columns = [col.upper() for col in df.columns]

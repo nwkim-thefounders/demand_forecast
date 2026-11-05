@@ -129,7 +129,8 @@ def regist_user(email: str, name: str) -> None:
     engine = snowflake_SQL.connect_snowflake()
     created_at = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
     query = (
-        "INSERT INTO ALLOWED_USERS (EMAIL, USER_NAME, ROLE, CREATED_AT) "
+        f"INSERT INTO {snowflake_SQL.get_allowed_users_fqn()} "
+        "(EMAIL, USER_NAME, ROLE, CREATED_AT) "
         "VALUES (:email, :name, 'USER', :created_at)"
     )
     with engine.connect() as conn:

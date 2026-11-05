@@ -4,12 +4,45 @@ from snowflake.sqlalchemy import URL
 from snowflake.connector.pandas_tools import pd_writer
 from cryptography.hazmat.primitives import serialization
 from datetime import timedelta
+import os
 import logging
 import pandas as pd
 import time
 import streamlit as st
 
 logger = logging.getLogger(__name__)
+
+# ALLOWED_USERS 위치만 전환 설정으로 제어하며 다른 테이블 접속 기본값은 유지한다.
+ALLOWED_USERS_FQN_KEY = "ALLOWED_USERS_FQN"
+ALLOWED_USERS_FQN_LEGACY = "TESTDB.PUBLIC.ALLOWED_USERS"
+ALLOWED_USERS_FQN_NEW = "DATA_DB.ADMIN.ALLOWED_USERS"
+_ALLOWED_USERS_FQN_WHITELIST = frozenset(
+    {ALLOWED_USERS_FQN_LEGACY, ALLOWED_USERS_FQN_NEW}
+)
+
+
+def get_allowed_users_fqn() -> str:
+    """ALLOWED_USERS 테이블의 허용된 완전 한정 이름을 반환한다.
+
+    Returns:
+        str: 설정된 ALLOWED_USERS 테이블 FQN.
+
+    Raises:
+        ValueError: 설정 값이 허용된 두 위치 중 하나가 아닐 때.
+    """
+    # 환경 변수와 Streamlit 최상위 secrets를 순서대로 확인하고 이전 위치를 기본값으로 둔다.
+    value = os.environ.get(ALLOWED_USERS_FQN_KEY)
+    if not value:
+        try:
+            value = st.secrets.get(ALLOWED_USERS_FQN_KEY)
+        except (FileNotFoundError, KeyError, AttributeError) as exc:
+            logger.warning("ALLOWED_USERS_FQN secrets 조회 실패: %s", type(exc).__name__)
+            value = None
+
+    fqn = str(value).strip().upper() if value else ALLOWED_USERS_FQN_LEGACY
+    if fqn not in _ALLOWED_USERS_FQN_WHITELIST:
+        raise ValueError(f"{ALLOWED_USERS_FQN_KEY} 값이 허용 목록에 없습니다.")
+    return fqn
 
 
 def connect_snowflake() -> Engine:
