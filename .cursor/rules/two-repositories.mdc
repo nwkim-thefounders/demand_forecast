@@ -1,0 +1,10 @@
+---
+description: 수요예측 프로젝트의 두 GitHub 저장소 배포 규칙
+alwaysApply: true
+---
+
+# 두 저장소 배포
+
+- 배포 또는 push를 요청받으면 `nwkim-thefounders/demand_forecast`와 `thefoundersinc/streamlit-demandforecast-dashboard`의 `main`에 요청한 변경을 각각 반영한다. 사용자가 배포 대상을 별도로 제한하면 그 지시를 따른다.
+- 저장소마다 최신 원격과 기존 변경을 확인하고 필요한 변경만 적용·검증한다. 이미 반영된 변경에 대해 빈 커밋을 만들지 않는다.
+- 각 저장소의 push 결과와 커밋, 연결 앱의 배포 확인 여부를 따로 보고한다. 이 규칙은 운영 DB 쓰기나 자격증명·권한 변경을 허용하지 않는다.
